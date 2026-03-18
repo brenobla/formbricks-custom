@@ -52,8 +52,22 @@ WORKDIR /app
 # Prepare the build
 COPY . .
 
-# Create a .env file
-RUN touch apps/web/.env
+# Build-time secrets (Railway injects env vars as ARGs)
+ARG DATABASE_URL=""
+ARG ENCRYPTION_KEY=""
+ARG REDIS_URL=""
+ARG NEXTAUTH_SECRET=""
+ARG NEXTAUTH_URL=""
+ARG WEBAPP_URL=""
+
+# Create a .env file with build-time variables
+RUN touch apps/web/.env && \
+    if [ -n "$DATABASE_URL" ]; then echo "DATABASE_URL=$DATABASE_URL" >> apps/web/.env; fi && \
+    if [ -n "$ENCRYPTION_KEY" ]; then echo "ENCRYPTION_KEY=$ENCRYPTION_KEY" >> apps/web/.env; fi && \
+    if [ -n "$REDIS_URL" ]; then echo "REDIS_URL=$REDIS_URL" >> apps/web/.env; fi && \
+    if [ -n "$NEXTAUTH_SECRET" ]; then echo "NEXTAUTH_SECRET=$NEXTAUTH_SECRET" >> apps/web/.env; fi && \
+    if [ -n "$NEXTAUTH_URL" ]; then echo "NEXTAUTH_URL=$NEXTAUTH_URL" >> apps/web/.env; fi && \
+    if [ -n "$WEBAPP_URL" ]; then echo "WEBAPP_URL=$WEBAPP_URL" >> apps/web/.env; fi
 
 # Install the dependencies
 RUN pnpm install --ignore-scripts
@@ -62,7 +76,13 @@ RUN pnpm install --ignore-scripts
 RUN pnpm build --filter=@formbricks/database
 
 # Build the project
-RUN pnpm build --filter=@formbricks/web...
+RUN DATABASE_URL="${DATABASE_URL}" \
+    ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
+    REDIS_URL="${REDIS_URL}" \
+    NEXTAUTH_SECRET="${NEXTAUTH_SECRET}" \
+    NEXTAUTH_URL="${NEXTAUTH_URL}" \
+    WEBAPP_URL="${WEBAPP_URL}" \
+    pnpm build --filter=@formbricks/web...
 
 #
 ## step 3: setup production runner
