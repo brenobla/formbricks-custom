@@ -262,14 +262,14 @@ const validateLicenseDetails = (data: unknown): TEnterpriseLicenseDetails => {
 };
 
 // Fallback functions
-let memoryCache: {
+let _memoryCache: {
   data: TEnterpriseLicenseResult;
   timestamp: number;
 } | null = null;
 
-const MEMORY_CACHE_TTL_MS = 60 * 1000; // 1 minute memory cache to avoid stampedes and reduce load when Redis is slow
+const _MEMORY_CACHE_TTL_MS = 60 * 1000; // 1 minute memory cache to avoid stampedes and reduce load when Redis is slow
 
-let getEnterpriseLicensePromise: Promise<TEnterpriseLicenseResult> | null = null;
+let _getEnterpriseLicensePromise: Promise<TEnterpriseLicenseResult> | null = null;
 
 const getFallbackLevel = (
   liveLicense: TEnterpriseLicenseDetails | null,
@@ -510,7 +510,7 @@ export const fetchLicense = async (): Promise<TEnterpriseLicenseDetails | null> 
 /**
  * Core license state evaluation logic.
  * Accepts pre-fetched license details and applies fallback / grace-period rules.
- * Sets the in-process memoryCache as a side effect so subsequent requests benefit.
+ * Sets the in-process _memoryCache as a side effect so subsequent requests benefit.
  */
 const computeLicenseState = async (
   liveLicenseDetails: TEnterpriseLicenseDetails | null
@@ -562,7 +562,7 @@ const computeLicenseState = async (
         fallbackLevel: "live" as const,
         status: liveLicenseDetails.status,
       };
-      memoryCache = { data: liveResult, timestamp: Date.now() };
+      _memoryCache = { data: liveResult, timestamp: Date.now() };
       return liveResult;
     }
 
@@ -588,7 +588,7 @@ const computeLicenseState = async (
         fallbackLevel: "grace" as const,
         status: liveLicenseDetails?.status ?? "unreachable",
       };
-      memoryCache = { data: graceResult, timestamp: Date.now() };
+      _memoryCache = { data: graceResult, timestamp: Date.now() };
       return graceResult;
     }
 
@@ -602,17 +602,17 @@ const computeLicenseState = async (
           fallbackLevel: "default" as const,
           status: "expired" as const,
         };
-        memoryCache = { data: expiredResult, timestamp: Date.now() };
+        _memoryCache = { data: expiredResult, timestamp: Date.now() };
         return expiredResult;
       }
       const failResult = await handleInitialFailure(currentTime);
-      memoryCache = { data: failResult, timestamp: Date.now() };
+      _memoryCache = { data: failResult, timestamp: Date.now() };
       return failResult;
     }
   }
 
   const finalFailResult = await handleInitialFailure(currentTime);
-  memoryCache = { data: finalFailResult, timestamp: Date.now() };
+  _memoryCache = { data: finalFailResult, timestamp: Date.now() };
   return finalFailResult;
 };
 
@@ -642,7 +642,7 @@ export const getLicenseFeatures = async (): Promise<TEnterpriseLicenseFeatures |
  * Used by the recheck license action to force a fresh fetch without losing grace period
  */
 export const clearLicenseCache = async (): Promise<void> => {
-  memoryCache = null;
+  _memoryCache = null;
   const cacheKeys = getCacheKeys();
   // Only clear the main fetch cache, NOT the previous result cache
   // This preserves the grace period fallback if the server is unreachable
@@ -684,7 +684,7 @@ export const fetchLicenseFresh = async (): Promise<TEnterpriseLicenseDetails | n
 export const computeFreshLicenseState = async (
   freshLicense: TEnterpriseLicenseDetails | null
 ): Promise<TEnterpriseLicenseResult> => {
-  memoryCache = null;
+  _memoryCache = null;
   return computeLicenseState(freshLicense);
 };
 
