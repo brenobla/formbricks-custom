@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
+
 const DATACRAZY_API_URL = "https://api.g1.datacrazy.io/api/v1";
 const DATACRAZY_TOKEN =
   "dc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YmIyNzE2ODJlYTgwNWMyNDIzZjIwNCIsInRlbmFudElkIjoiODVlMjA3M2EtMzg4Ny00Y2QyLWFkODMtZjkwNTg0YTJhMzE0IiwibmFtZSI6IkZvcm1icmlja3MiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc0FkbWluIjp0cnVlLCJpYXQiOjE3NzM4NzI5MTgsImV4cCI6MTg0MTcxMzE5OX0.w-rnb8VgXq8Zqp0eQ8P0ZUVQKdjxSfJPtJOOjZqnd6k";
@@ -79,6 +81,60 @@ async function createDataCrazyBusiness(leadId: string) {
   return response.json();
 }
 
+async function sendSlackNotification(data: Record<string, string>) {
+  const fields: string[] = [];
+  if (data.name) fields.push(`*Nome:* ${data.name}`);
+  if (data.email) fields.push(`*Email:* ${data.email}`);
+  if (data.phone) fields.push(`*WhatsApp:* ${data.phone}`);
+  if (data.company) fields.push(`*Empresa:* ${data.company}`);
+  if (data.site) fields.push(`*Site:* ${data.site}`);
+  if (data.cargo) fields.push(`*Cargo:* ${data.cargo}`);
+  if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
+  if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
+
+  const payload = {
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "🔥 Novo Lead — FirePay Enterprise",
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: fields.join("\n"),
+        },
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: `Recebido via <https://forms.firepay.com.br|Formbricks> em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+          },
+        ],
+      },
+    ],
+  };
+
+  const response = await fetch(SLACK_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error(`[Slack Webhook] Failed: ${response.status} - ${error}`);
+  } else {
+    console.log("[Slack Webhook] Notification sent successfully");
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -146,6 +202,13 @@ export async function POST(request: NextRequest) {
     // 2. Create business (deal) in Vendas pipeline
     const business = await createDataCrazyBusiness(lead.id);
     console.log("[DataCrazy Webhook] Business created:", JSON.stringify(business, null, 2));
+
+    // 3. Send Slack notification (non-blocking — don't fail the webhook if Slack fails)
+    try {
+      await sendSlackNotification(mappedData);
+    } catch (slackError) {
+      console.error("[Slack Webhook] Error:", slackError);
+    }
 
     return NextResponse.json({
       success: true,
