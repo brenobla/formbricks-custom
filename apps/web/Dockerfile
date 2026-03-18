@@ -69,8 +69,8 @@ RUN touch apps/web/.env && \
     if [ -n "$NEXTAUTH_URL" ]; then echo "NEXTAUTH_URL=$NEXTAUTH_URL" >> apps/web/.env; fi && \
     if [ -n "$WEBAPP_URL" ]; then echo "WEBAPP_URL=$WEBAPP_URL" >> apps/web/.env; fi
 
-# Install the dependencies
-RUN pnpm install --ignore-scripts
+# Install the dependencies (need postinstall scripts for native modules)
+RUN pnpm install
 
 # Build the database package first
 RUN pnpm build --filter=@formbricks/database
