@@ -166,7 +166,4 @@ USER nextjs
 RUN mkdir -p /home/nextjs/apps/web/uploads/ && \
     mkdir -p /home/nextjs/apps/web/saml-connection
 
-VOLUME /home/nextjs/apps/web/uploads/
-VOLUME /home/nextjs/apps/web/saml-connection
-
 CMD ["/home/nextjs/start.sh"]
