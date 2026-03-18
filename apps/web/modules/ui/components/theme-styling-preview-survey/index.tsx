@@ -195,9 +195,9 @@ export const ThemeStylingPreviewSurvey = ({
               ContentRef={ContentRef as React.MutableRefObject<HTMLDivElement> | null}
               isEditorView>
               {!project.styling?.isLogoHidden && (
-                <button className="absolute left-5 top-5" onClick={scrollToEditLogoSection}>
+                <div className="w-full pt-5" onClick={scrollToEditLogoSection}>
                   <ClientLogo projectLogo={project.logo} previewSurvey />
-                </button>
+                </div>
               )}
               <div
                 key={surveyKey}

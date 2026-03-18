@@ -25,6 +25,8 @@ export const ClientLogo = ({
 }: ClientLogoProps) => {
   const { t } = useTranslation();
   const logoToUse = surveyLogo?.url ? surveyLogo : projectLogo;
+  const logoAlignment = (logoToUse as any)?.alignment || "left";
+  const logoHeight = (logoToUse as any)?.height;
 
   let positionClasses = "";
   if (!previewSurvey) {
@@ -35,9 +37,20 @@ export const ClientLogo = ({
     }
   }
 
+  const alignmentClass =
+    logoAlignment === "center"
+      ? "justify-center"
+      : logoAlignment === "right"
+        ? "justify-end"
+        : "justify-start";
+
   return (
     <div
-      className={cn(positionClasses, "group absolute z-0 rounded-lg")}
+      className={cn(
+        previewSurvey ? `flex w-full px-5 ${alignmentClass}` : positionClasses,
+        !previewSurvey && "absolute",
+        "group z-0 rounded-lg"
+      )}
       style={{ backgroundColor: logoToUse?.bgColor }}>
       {previewSurvey && environmentId && (
         <Link
@@ -53,12 +66,17 @@ export const ClientLogo = ({
       {logoToUse?.url ? (
         <Image
           src={logoToUse?.url}
-          className={cn(
-            previewSurvey ? "max-h-12" : "max-h-16 md:max-h-20",
-            "w-auto max-w-40 object-contain p-1 md:max-w-56"
-          )}
+          className={cn("w-auto object-contain p-1", previewSurvey ? "max-w-40" : "max-w-40 md:max-w-56")}
+          style={{
+            height: logoHeight
+              ? `${previewSurvey ? Math.min(logoHeight, 48) : logoHeight}px`
+              : previewSurvey
+                ? "48px"
+                : undefined,
+            maxHeight: previewSurvey ? "48px" : logoHeight ? `${logoHeight}px` : "80px",
+          }}
           width={256}
-          height={64}
+          height={logoHeight || 64}
           alt="Company Logo"
         />
       ) : (
