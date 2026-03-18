@@ -145,7 +145,13 @@ export function WelcomeCard({
     <ScrollableContainer fullSizeCards={fullSizeCards}>
       <div>
         {fileUrl ? (
-          <img src={fileUrl} className="mb-8 max-h-96 w-1/4 object-contain" alt={t("common.company_logo")} />
+          <div className="mb-8 flex justify-center">
+            <img
+              src={fileUrl}
+              className="max-h-20 max-w-[60%] object-contain"
+              alt={t("common.company_logo")}
+            />
+          </div>
         ) : null}
 
         <Headline
