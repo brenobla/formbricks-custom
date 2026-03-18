@@ -26,6 +26,8 @@ interface WelcomeCardProps {
   variablesData: TResponseVariables;
   fullSizeCards: boolean;
   isPreviewMode?: boolean;
+  logoAlignment?: "left" | "center" | "right";
+  logoHeight?: number;
 }
 
 function TimerIcon() {
@@ -80,6 +82,8 @@ export function WelcomeCard({
   variablesData,
   fullSizeCards,
   isPreviewMode = false,
+  logoAlignment = "center",
+  logoHeight = 64,
 }: WelcomeCardProps) {
   const { t } = useTranslation();
 
@@ -145,10 +149,12 @@ export function WelcomeCard({
     <ScrollableContainer fullSizeCards={fullSizeCards}>
       <div>
         {fileUrl ? (
-          <div className="mb-8 flex justify-center">
+          <div
+            className={`mb-8 flex ${logoAlignment === "center" ? "justify-center" : logoAlignment === "right" ? "justify-end" : "justify-start"}`}>
             <img
               src={fileUrl}
-              className="max-h-20 max-w-[60%] object-contain"
+              style={{ height: `${logoHeight}px` }}
+              className="max-w-[80%] object-contain"
               alt={t("common.company_logo")}
             />
           </div>

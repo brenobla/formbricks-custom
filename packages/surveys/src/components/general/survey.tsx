@@ -775,6 +775,8 @@ export function Survey({
             variablesData={currentVariables}
             isPreviewMode={isPreviewMode}
             fullSizeCards={fullSizeCards}
+            logoAlignment={(styling.logo as any)?.alignment || "center"}
+            logoHeight={(styling.logo as any)?.height || 64}
           />
         );
       } else if (blockIdx >= localSurvey.blocks.length) {

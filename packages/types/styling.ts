@@ -15,9 +15,18 @@ export const ZCardArrangement = z.object({
   appSurveys: ZCardArrangementOptions,
 });
 
+export const ZLogoAlignment = z.enum(["left", "center", "right"]);
+export type TLogoAlignment = z.infer<typeof ZLogoAlignment>;
+
+export const ZLogoSize = z.enum(["small", "medium", "large"]);
+export type TLogoSize = z.infer<typeof ZLogoSize>;
+
 export const ZLogo = z.object({
   url: ZStorageUrl.optional(),
   bgColor: z.string().optional(),
+  alignment: ZLogoAlignment.optional(),
+  size: ZLogoSize.optional(),
+  height: z.number().min(20).max(200).optional(),
 });
 export type TLogo = z.infer<typeof ZLogo>;
 
