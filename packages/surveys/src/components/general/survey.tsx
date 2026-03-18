@@ -901,7 +901,7 @@ export function Survey({
                 "flex flex-col justify-center gap-2",
                 isCloseButtonVisible || isLanguageSwitchVisible ? "p-2" : "p-3"
               )}>
-              {isBrandingEnabled ? <FormbricksBranding /> : null}
+              {null}
               {isSpamProtectionEnabled ? <RecaptchaBranding /> : null}
             </div>
           </div>

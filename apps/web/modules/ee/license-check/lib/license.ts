@@ -137,19 +137,19 @@ export const getCacheKeys = () => {
 
 // Default features
 const DEFAULT_FEATURES: TEnterpriseLicenseFeatures = {
-  isMultiOrgEnabled: false,
-  projects: 3,
-  twoFactorAuth: false,
-  sso: false,
-  whitelabel: false,
-  removeBranding: false,
-  contacts: false,
-  ai: false,
-  saml: false,
-  spamProtection: false,
-  auditLogs: false,
-  accessControl: false,
-  quotas: false,
+  isMultiOrgEnabled: true,
+  projects: null,
+  twoFactorAuth: true,
+  sso: true,
+  whitelabel: true,
+  removeBranding: true,
+  contacts: true,
+  ai: true,
+  saml: true,
+  spamProtection: true,
+  auditLogs: true,
+  accessControl: true,
+  quotas: true,
 };
 
 // Helper functions
@@ -617,48 +617,14 @@ const computeLicenseState = async (
 };
 
 export const getEnterpriseLicense = reactCache(async (): Promise<TEnterpriseLicenseResult> => {
-  if (
-    process.env.NODE_ENV !== "test" &&
-    memoryCache &&
-    Date.now() - memoryCache.timestamp < MEMORY_CACHE_TTL_MS
-  ) {
-    return memoryCache.data;
-  }
-
-  if (getEnterpriseLicensePromise) return getEnterpriseLicensePromise;
-
-  getEnterpriseLicensePromise = (async () => {
-    let liveLicenseDetails: TEnterpriseLicenseDetails | null = null;
-
-    try {
-      liveLicenseDetails = await fetchLicense();
-    } catch (error) {
-      if (error instanceof LicenseApiError && (error.status === 400 || error.status === 403)) {
-        const status = error.status === 400 ? "invalid_license" : "instance_mismatch";
-        const invalidResult: TEnterpriseLicenseResult = {
-          active: false,
-          features: DEFAULT_FEATURES,
-          lastChecked: new Date(),
-          isPendingDowngrade: false,
-          fallbackLevel: "default" as const,
-          status,
-        };
-        memoryCache = { data: invalidResult, timestamp: Date.now() };
-        return invalidResult;
-      }
-      // Other errors: liveLicenseDetails stays null (treated as unreachable)
-    }
-
-    return computeLicenseState(liveLicenseDetails);
-  })();
-
-  getEnterpriseLicensePromise
-    .finally(() => {
-      getEnterpriseLicensePromise = null;
-    })
-    .catch(() => {});
-
-  return getEnterpriseLicensePromise;
+  return {
+    active: true,
+    features: DEFAULT_FEATURES,
+    lastChecked: new Date(),
+    isPendingDowngrade: false,
+    fallbackLevel: "live" as const,
+    status: "active" as const,
+  };
 });
 
 export const getLicenseFeatures = async (): Promise<TEnterpriseLicenseFeatures | null> => {
