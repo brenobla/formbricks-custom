@@ -40,7 +40,7 @@ async function createDataCrazyLead(data: Record<string, string>) {
   if (data.faturamento) notes.push(`Faturamento: ${data.faturamento}`);
   if (data.checkout) notes.push(`Checkout atual: ${data.checkout}`);
   if (notes.length > 0) {
-    leadPayload.notes = { content: notes.join("\n") };
+    leadPayload.notes = notes.join("\n");
   }
 
   const response = await fetch(`${DATACRAZY_API_URL}/leads`, {
