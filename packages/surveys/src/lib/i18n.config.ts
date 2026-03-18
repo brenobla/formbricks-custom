@@ -23,7 +23,7 @@ i18n
   .use(ICU)
   .use(initReactI18next)
   .init({
-    fallbackLng: "en",
+    fallbackLng: "pt",
     supportedLngs: [
       "ar",
       "da",
