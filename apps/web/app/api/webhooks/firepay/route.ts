@@ -164,8 +164,8 @@ export async function POST(request: NextRequest) {
     // { id, checkout_id, type, status, payment_method, price, product: {name}, client: {name, email, phone, document}, ... }
     const txStatus = body.status;
 
-    // Only process "compra-realizada" (paid) events
-    if (txStatus !== "compra-realizada") {
+    // Only process "paid" events
+    if (txStatus !== "paid") {
       console.log(`[FirePay Webhook] Ignoring status: ${txStatus}`);
       return NextResponse.json({ success: true, message: `Ignored status: ${txStatus}` });
     }
