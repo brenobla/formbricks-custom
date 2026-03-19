@@ -8,7 +8,6 @@ const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 
 // Pipeline Vendas
 const PIPELINE_ID = "a0dac4ab-4317-4aa8-b3af-c065770d073a";
-const STAGE_LEADS_ID = "ee8bb812-f039-4f77-b2d1-e078a878d71e";
 const STAGE_EFETIVADO_ID = "b28288a3-f256-4749-b39d-2a888c04e48d";
 
 // --- DataCrazy API helpers ---
