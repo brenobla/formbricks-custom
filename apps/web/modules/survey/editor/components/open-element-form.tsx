@@ -137,7 +137,7 @@ export const OpenElementForm = ({
             htmlId={`longAnswer-${element.id}`}
             title={t("environments.surveys.edit.long_answer")}
             description={t("environments.surveys.edit.long_answer_toggle_description")}
-            disabled={element.inputType !== "text"}
+            disabled={false}
             customContainerClass="p-0"
           />
         </div>
