@@ -69,7 +69,7 @@ export function OpenTextElement({
         onChange={handleChange}
         required={isRequired}
         requiredLabel={t("common.required")}
-        longAnswer={element.longAnswer !== false}
+        longAnswer={element.inputType === "text" && element.longAnswer !== false}
         inputType={getInputType()}
         charLimit={element.inputType === "text" ? element.charLimit : undefined}
         errorMessage={errorMessage}
