@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// DataCrazy native webhook — creates lead + business with custom field mapping
-const DATACRAZY_WEBHOOK_URL =
-  "https://api.datacrazy.io/v1/crm/api/crm/integrations/webhook/business/69b031f7-f44c-4cca-a33f-10e4f92b987e";
+const DATACRAZY_API_URL = "https://api.g1.datacrazy.io/api/v1";
+const DATACRAZY_TOKEN =
+  "dc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YmIyNzE2ODJlYTgwNWMyNDIzZjIwNCIsInRlbmFudElkIjoiODVlMjA3M2EtMzg4Ny00Y2QyLWFkODMtZjkwNTg0YTJhMzE0IiwibmFtZSI6IkZvcm1icmlja3MiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc0FkbWluIjp0cnVlLCJpYXQiOjE3NzM4NzI5MTgsImV4cCI6MTg0MTcxMzE5OX0.w-rnb8VgXq8Zqp0eQ8P0ZUVQKdjxSfJPtJOOjZqnd6k";
+
+// Pipeline SDR > Stage "Smart Lead"
+const SDR_SMARTLEAD_STAGE_ID = "76cbf3a7-07a2-4af7-9816-95c923630be2";
 
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 
@@ -17,18 +20,15 @@ function extractValue(val: any): string {
 function mapCallyData(body: any): Record<string, string> {
   const mapped: Record<string, string> = {};
 
-  // Cal.com/Cally webhook payload structure:
-  // body.payload.attendees[0].name, body.payload.attendees[0].email
-  // body.payload.responses.{fieldSlug} for custom fields
   const payload = body?.payload || body;
   const attendee = payload?.attendees?.[0] || {};
   const responses = payload?.responses || {};
 
-  // Attendee info (always present)
+  // Attendee info
   if (attendee.name) mapped.name = attendee.name;
   if (attendee.email) mapped.email = attendee.email;
 
-  // Override with responses if available (responses have priority)
+  // Override with responses if available
   const nameResp = extractValue(responses.name);
   const emailResp = extractValue(responses.email);
   if (nameResp) mapped.name = nameResp;
@@ -38,41 +38,69 @@ function mapCallyData(body: any): Record<string, string> {
   const phone = extractValue(responses.phone);
   if (phone) mapped.phone = phone;
 
-  // Custom fields from Cally form
+  // Custom fields
   const checkout = extractValue(responses.checkout);
   if (checkout) mapped.checkout = checkout;
 
   const faturamento = extractValue(responses.faturamento);
   if (faturamento) mapped.faturamento = faturamento;
 
-  // Company (if field exists)
   const company = extractValue(responses.company);
   if (company) mapped.company = company;
 
-  // Log all responses for debugging
   console.log("[Cally] All responses:", JSON.stringify(responses));
-
   return mapped;
 }
 
-async function sendToDataCrazy(data: Record<string, string>) {
-  const response = await fetch(DATACRAZY_WEBHOOK_URL, {
+async function createLead(data: Record<string, string>) {
+  const payload: Record<string, any> = {
+    name: data.name || "Lead Cally",
+    source: "Cally - Agendamento",
+  };
+
+  if (data.email) payload.email = data.email;
+  if (data.phone) payload.phone = data.phone;
+  if (data.company) payload.company = data.company;
+
+  const notes: string[] = [];
+  if (data.checkout) notes.push(`Checkout: ${data.checkout}`);
+  if (data.faturamento) notes.push(`Faturamento: ${data.faturamento}`);
+  if (notes.length > 0) payload.notes = notes.join("\n");
+
+  const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
+    },
+    body: JSON.stringify(payload),
   });
 
-  const responseText = await response.text();
-  console.log("[Cally→DataCrazy] Status:", response.status, "Response:", responseText);
-
-  if (!response.ok) {
-    throw new Error(`DataCrazy webhook failed: ${response.status} - ${responseText}`);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Create lead failed: ${res.status} - ${err}`);
   }
-
-  return responseText;
+  return res.json();
 }
 
-async function sendSlackNotification(data: Record<string, string>, payload: any) {
+async function createBusiness(leadId: string) {
+  const res = await fetch(`${DATACRAZY_API_URL}/businesses`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
+    },
+    body: JSON.stringify({ leadId, stageId: SDR_SMARTLEAD_STAGE_ID }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Create business failed: ${res.status} - ${err}`);
+  }
+  return res.json();
+}
+
+async function sendSlackNotification(data: Record<string, string>, body: any) {
   if (!SLACK_WEBHOOK_URL) return;
 
   const fields: string[] = [];
@@ -83,46 +111,31 @@ async function sendSlackNotification(data: Record<string, string>, payload: any)
   if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
   if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
 
-  const p = payload?.payload || payload;
+  const p = body?.payload || body;
   if (p?.title) fields.push(`*Reunião:* ${p.title}`);
   if (p?.startTime) {
     const date = new Date(p.startTime);
     fields.push(`*Data:* ${date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`);
   }
 
-  const slackPayload = {
-    blocks: [
-      {
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: "📅 Nova Reserva — Cally",
-          emoji: true,
-        },
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: fields.join("\n"),
-        },
-      },
-      {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: `Recebido via Cally em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
-          },
-        ],
-      },
-    ],
-  };
-
   await fetch(SLACK_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(slackPayload),
+    body: JSON.stringify({
+      blocks: [
+        { type: "header", text: { type: "plain_text", text: "📅 Nova Reserva — Cally", emoji: true } },
+        { type: "section", text: { type: "mrkdwn", text: fields.join("\n") } },
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: `Recebido via Cally em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+            },
+          ],
+        },
+      ],
+    }),
   });
 }
 
@@ -135,21 +148,25 @@ export async function POST(request: NextRequest) {
     console.log("[Cally Webhook] Mapped:", JSON.stringify(mappedData));
 
     if (!mappedData.name && !mappedData.email) {
-      console.log("[Cally Webhook] No attendee data, skipping");
       return NextResponse.json({ success: true, message: "No attendee data" });
     }
 
-    // 1. Send to DataCrazy
-    await sendToDataCrazy(mappedData);
+    // 1. Create lead via API
+    const lead = await createLead(mappedData);
+    console.log("[Cally] Lead created:", lead.id);
 
-    // 2. Send Slack notification
+    // 2. Create business in SDR > Smart Lead
+    const business = await createBusiness(lead.id);
+    console.log("[Cally] Business created:", business.id);
+
+    // 3. Slack notification
     try {
       await sendSlackNotification(mappedData, body);
     } catch (e) {
       console.error("[Cally→Slack] Error:", e);
     }
 
-    return NextResponse.json({ success: true, ok: true });
+    return NextResponse.json({ success: true, leadId: lead.id, businessId: business.id });
   } catch (error) {
     console.error("[Cally Webhook] Error:", error);
     return NextResponse.json(
