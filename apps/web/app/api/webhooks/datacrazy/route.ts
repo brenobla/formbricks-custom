@@ -6,8 +6,8 @@ const DATACRAZY_API_URL = "https://api.g1.datacrazy.io/api/v1";
 const DATACRAZY_TOKEN =
   "dc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YmIyNzE2ODJlYTgwNWMyNDIzZjIwNCIsInRlbmFudElkIjoiODVlMjA3M2EtMzg4Ny00Y2QyLWFkODMtZjkwNTg0YTJhMzE0IiwibmFtZSI6IkZvcm1icmlja3MiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc0FkbWluIjp0cnVlLCJpYXQiOjE3NzM4NzI5MTgsImV4cCI6MTg0MTcxMzE5OX0.w-rnb8VgXq8Zqp0eQ8P0ZUVQKdjxSfJPtJOOjZqnd6k";
 
-// Pipeline Vendas > Stage "Novo"
-const VENDAS_STAGE_ID = "ee8bb812-f039-4f77-b2d1-e078a878d71e";
+// Pipeline SDR > Stage "Smart Lead"
+const SDR_SMARTLEAD_STAGE_ID = "76cbf3a7-07a2-4af7-9816-95c923630be2";
 
 // DataCrazy native webhook — creates lead + business with custom field mapping
 const DATACRAZY_WEBHOOK_URL =
@@ -73,7 +73,7 @@ async function createDataCrazyBusiness(leadId: string) {
     },
     body: JSON.stringify({
       leadId,
-      stageId: VENDAS_STAGE_ID,
+      stageId: SDR_SMARTLEAD_STAGE_ID,
     }),
   });
 
@@ -199,35 +199,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: "No lead data found, skipped" });
     }
 
-    // 1. Send to DataCrazy native webhook (creates lead + business with custom fields)
-    const dcWebhookResponse = await fetch(DATACRAZY_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(mappedData),
-    });
+    // 1. Create lead + business via API (ensures correct pipeline/stage)
+    const lead = await createDataCrazyLead(mappedData);
+    console.log("[DataCrazy Webhook] Lead created:", JSON.stringify(lead, null, 2));
 
-    let dcResult: any = {};
-    const dcBody = await dcWebhookResponse.text();
+    const business = await createDataCrazyBusiness(lead.id);
+    console.log("[DataCrazy Webhook] Business created in SDR/Smart Lead:", JSON.stringify(business, null, 2));
+
+    // 2. Also send to native webhook to populate custom fields (non-blocking)
     try {
-      dcResult = JSON.parse(dcBody);
-    } catch {
-      dcResult = { raw: dcBody };
-    }
-
-    console.log(
-      "[DataCrazy Webhook] Native webhook response:",
-      dcWebhookResponse.status,
-      JSON.stringify(dcResult)
-    );
-
-    // 2. Fallback: if native webhook fails, use API directly
-    if (!dcWebhookResponse.ok) {
-      console.log("[DataCrazy Webhook] Native webhook failed, using API fallback");
-      const lead = await createDataCrazyLead(mappedData);
-      console.log("[DataCrazy Webhook] Lead created via API:", JSON.stringify(lead, null, 2));
-      const business = await createDataCrazyBusiness(lead.id);
-      console.log("[DataCrazy Webhook] Business created via API:", JSON.stringify(business, null, 2));
-      dcResult = { leadId: lead.id, businessId: business.id, method: "api-fallback" };
+      const dcWebhookResponse = await fetch(DATACRAZY_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mappedData),
+      });
+      console.log("[DataCrazy Webhook] Native webhook status:", dcWebhookResponse.status);
+    } catch (webhookError) {
+      console.error("[DataCrazy Webhook] Native webhook error:", webhookError);
     }
 
     // 3. Send Slack notification (non-blocking)
@@ -239,7 +227,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      ...dcResult,
+      leadId: lead.id,
+      businessId: business.id,
     });
   } catch (error) {
     console.error("[DataCrazy Webhook] Error:", error);
