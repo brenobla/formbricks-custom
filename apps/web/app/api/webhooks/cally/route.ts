@@ -6,46 +6,51 @@ const DATACRAZY_WEBHOOK_URL =
 
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 
+function extractValue(val: any): string {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "object" && val.value) return String(val.value);
+  if (typeof val === "object" && val.label) return String(val.label);
+  return String(val);
+}
+
 function mapCallyData(body: any): Record<string, string> {
   const mapped: Record<string, string> = {};
 
   // Cal.com/Cally webhook payload structure:
   // body.payload.attendees[0].name, body.payload.attendees[0].email
-  // body.payload.attendees[0].timeZone, body.payload.organizer.name
-  // body.payload.title, body.payload.startTime, body.payload.endTime
+  // body.payload.responses.{fieldSlug} for custom fields
   const payload = body?.payload || body;
   const attendee = payload?.attendees?.[0] || {};
   const responses = payload?.responses || {};
 
-  // Attendee info
+  // Attendee info (always present)
   if (attendee.name) mapped.name = attendee.name;
   if (attendee.email) mapped.email = attendee.email;
 
-  // Try to get phone from responses (custom booking fields)
-  if (responses.phone?.value) mapped.phone = responses.phone.value;
-  else if (responses.phone) mapped.phone = String(responses.phone);
-  if (responses.company?.value) mapped.company = responses.company.value;
-  else if (responses.company) mapped.company = String(responses.company);
+  // Override with responses if available (responses have priority)
+  const nameResp = extractValue(responses.name);
+  const emailResp = extractValue(responses.email);
+  if (nameResp) mapped.name = nameResp;
+  if (emailResp) mapped.email = emailResp;
 
-  // Also check rescheduleReason, notes, location
-  const notes: string[] = [];
-  if (payload?.title) notes.push(`Reunião: ${payload.title}`);
-  if (payload?.startTime) {
-    const date = new Date(payload.startTime);
-    notes.push(`Data: ${date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`);
-  }
-  if (payload?.organizer?.name) notes.push(`Organizador: ${payload.organizer.name}`);
+  // Phone/WhatsApp
+  const phone = extractValue(responses.phone);
+  if (phone) mapped.phone = phone;
 
-  // Check all responses for additional data
-  for (const [key, val] of Object.entries(responses)) {
-    if (key === "name" || key === "email" || key === "phone" || key === "company") continue;
-    const value =
-      typeof val === "object" && val !== null ? (val as any).value || JSON.stringify(val) : String(val);
-    if (value && value !== "undefined") {
-      const label = key.charAt(0).toUpperCase() + key.slice(1);
-      notes.push(`${label}: ${value}`);
-    }
-  }
+  // Custom fields from Cally form
+  const checkout = extractValue(responses.checkout);
+  if (checkout) mapped.checkout = checkout;
+
+  const faturamento = extractValue(responses.faturamento);
+  if (faturamento) mapped.faturamento = faturamento;
+
+  // Company (if field exists)
+  const company = extractValue(responses.company);
+  if (company) mapped.company = company;
+
+  // Log all responses for debugging
+  console.log("[Cally] All responses:", JSON.stringify(responses));
 
   return mapped;
 }
@@ -75,6 +80,8 @@ async function sendSlackNotification(data: Record<string, string>, payload: any)
   if (data.email) fields.push(`*Email:* ${data.email}`);
   if (data.phone) fields.push(`*WhatsApp:* ${data.phone}`);
   if (data.company) fields.push(`*Empresa:* ${data.company}`);
+  if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
+  if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
 
   const p = payload?.payload || payload;
   if (p?.title) fields.push(`*Reunião:* ${p.title}`);
