@@ -16,7 +16,16 @@ const DATACRAZY_WEBHOOK_URL =
 // Map Formbricks question IDs to DataCrazy lead fields
 // These IDs come from the survey blocks
 const FIELD_MAP: Record<string, string> = {
-  // Try multiple possible question ID formats
+  // Actual CUID2 question IDs from the surveys
+  blx7ixux827c5xrcrb9fl2m9: "name", // Qual seu nome completo?
+  vgt3oqqdaogjmeppsuyq2zn4: "email", // Qual seu e-mail?
+  x69hbypuftyq99wb3x0drig8: "phone", // Qual seu Whatsapp?
+  qziv755kb71axfzxsoo4n5rf: "company", // Qual a sua empresa?
+  gm8e6hcyhdetukw1f4whlcuc: "instagram", // Qual o Instagram da sua empresa?
+  ga04117jjo69bals1got7fng: "cargo", // Qual seu cargo atual?
+  w0v1d756qnzrdzj3b60qd84e: "faturamento", // Qual seu faturamento mensal?
+  rzg15b2mt47ea5h0imy4obpj: "checkout", // Qual checkout usa atualmente?
+  // Legacy fallback IDs
   q_nome: "name",
   q_email: "email",
   q_whatsapp: "phone",
@@ -37,6 +46,7 @@ async function createDataCrazyLead(data: Record<string, string>) {
   if (data.phone) leadPayload.phone = data.phone;
   if (data.company) leadPayload.company = data.company;
   if (data.site) leadPayload.site = data.site;
+  if (data.instagram) leadPayload.instagram = data.instagram;
 
   // Add cargo, faturamento, checkout as notes
   const notes: string[] = [];
@@ -92,6 +102,7 @@ async function sendSlackNotification(data: Record<string, string>) {
   if (data.phone) fields.push(`*WhatsApp:* ${data.phone}`);
   if (data.company) fields.push(`*Empresa:* ${data.company}`);
   if (data.site) fields.push(`*Site:* ${data.site}`);
+  if (data.instagram) fields.push(`*Instagram:* ${data.instagram}`);
   if (data.cargo) fields.push(`*Cargo:* ${data.cargo}`);
   if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
   if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
