@@ -9,6 +9,10 @@ const DATACRAZY_TOKEN =
 // Pipeline Vendas > Stage "Novo"
 const VENDAS_STAGE_ID = "ee8bb812-f039-4f77-b2d1-e078a878d71e";
 
+// DataCrazy native webhook — creates lead + business with custom field mapping
+const DATACRAZY_WEBHOOK_URL =
+  "https://api.datacrazy.io/v1/crm/api/crm/integrations/webhook/business/69b031f7-f44c-4cca-a33f-10e4f92b987e";
+
 // Map Formbricks question IDs to DataCrazy lead fields
 // These IDs come from the survey blocks
 const FIELD_MAP: Record<string, string> = {
@@ -195,15 +199,38 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: "No lead data found, skipped" });
     }
 
-    // 1. Create lead in DataCrazy
-    const lead = await createDataCrazyLead(mappedData);
-    console.log("[DataCrazy Webhook] Lead created:", JSON.stringify(lead, null, 2));
+    // 1. Send to DataCrazy native webhook (creates lead + business with custom fields)
+    const dcWebhookResponse = await fetch(DATACRAZY_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(mappedData),
+    });
 
-    // 2. Create business (deal) in Vendas pipeline
-    const business = await createDataCrazyBusiness(lead.id);
-    console.log("[DataCrazy Webhook] Business created:", JSON.stringify(business, null, 2));
+    let dcResult: any = {};
+    const dcBody = await dcWebhookResponse.text();
+    try {
+      dcResult = JSON.parse(dcBody);
+    } catch {
+      dcResult = { raw: dcBody };
+    }
 
-    // 3. Send Slack notification (non-blocking — don't fail the webhook if Slack fails)
+    console.log(
+      "[DataCrazy Webhook] Native webhook response:",
+      dcWebhookResponse.status,
+      JSON.stringify(dcResult)
+    );
+
+    // 2. Fallback: if native webhook fails, use API directly
+    if (!dcWebhookResponse.ok) {
+      console.log("[DataCrazy Webhook] Native webhook failed, using API fallback");
+      const lead = await createDataCrazyLead(mappedData);
+      console.log("[DataCrazy Webhook] Lead created via API:", JSON.stringify(lead, null, 2));
+      const business = await createDataCrazyBusiness(lead.id);
+      console.log("[DataCrazy Webhook] Business created via API:", JSON.stringify(business, null, 2));
+      dcResult = { leadId: lead.id, businessId: business.id, method: "api-fallback" };
+    }
+
+    // 3. Send Slack notification (non-blocking)
     try {
       await sendSlackNotification(mappedData);
     } catch (slackError) {
@@ -212,8 +239,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      leadId: lead.id,
-      businessId: business.id,
+      ...dcResult,
     });
   } catch (error) {
     console.error("[DataCrazy Webhook] Error:", error);
