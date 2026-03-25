@@ -9,6 +9,10 @@ const DATACRAZY_TOKEN =
 // Pipeline SDR > Stage "Smart Lead"
 const SDR_SMARTLEAD_STAGE_ID = "76cbf3a7-07a2-4af7-9816-95c923630be2";
 
+// DataCrazy native webhook — populates custom/additional fields
+const DATACRAZY_WEBHOOK_URL =
+  "https://api.datacrazy.io/v1/crm/api/crm/integrations/webhook/business/69b031f7-f44c-4cca-a33f-10e4f92b987e";
+
 // Map Formbricks question IDs to field names
 const FIELD_MAP: Record<string, string> = {
   blx7ixux827c5xrcrb9fl2m9: "name", // Qual seu nome completo?
@@ -134,7 +138,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: "No lead data found, skipped" });
     }
 
-    // 1. Create lead via API
+    // 1. Create lead via API (basic fields: name, email, phone, company, instagram)
     const lead = await createLead(mappedData);
     console.log("[DataCrazy] Lead created:", lead.id);
 
@@ -142,7 +146,19 @@ export async function POST(request: NextRequest) {
     const business = await createBusiness(lead.id);
     console.log("[DataCrazy] Business created:", business.id);
 
-    // 3. Slack notification
+    // 3. Send to native webhook to populate custom/additional fields (Cargo, Faturamento, Checkout, etc.)
+    try {
+      const webhookRes = await fetch(DATACRAZY_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mappedData),
+      });
+      console.log("[DataCrazy] Native webhook status:", webhookRes.status);
+    } catch (e) {
+      console.error("[DataCrazy] Native webhook error:", e);
+    }
+
+    // 4. Slack notification
     try {
       await sendSlackNotification(mappedData);
     } catch (e) {
