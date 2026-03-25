@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 
-// DataCrazy native webhook — creates lead + business with custom field mapping
-const DATACRAZY_WEBHOOK_URL =
-  "https://api.datacrazy.io/v1/crm/api/crm/integrations/webhook/business/69b031f7-f44c-4cca-a33f-10e4f92b987e";
+const DATACRAZY_API_URL = "https://api.g1.datacrazy.io/api/v1";
+const DATACRAZY_TOKEN =
+  "dc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YmIyNzE2ODJlYTgwNWMyNDIzZjIwNCIsInRlbmFudElkIjoiODVlMjA3M2EtMzg4Ny00Y2QyLWFkODMtZjkwNTg0YTJhMzE0IiwibmFtZSI6IkZvcm1icmlja3MiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc0FkbWluIjp0cnVlLCJpYXQiOjE3NzM4NzI5MTgsImV4cCI6MTg0MTcxMzE5OX0.w-rnb8VgXq8Zqp0eQ8P0ZUVQKdjxSfJPtJOOjZqnd6k";
 
-// Map Formbricks question IDs to DataCrazy field names
+// Pipeline SDR > Stage "Smart Lead"
+const SDR_SMARTLEAD_STAGE_ID = "76cbf3a7-07a2-4af7-9816-95c923630be2";
+
+// Map Formbricks question IDs to field names
 const FIELD_MAP: Record<string, string> = {
-  // Actual CUID2 question IDs from the surveys
   blx7ixux827c5xrcrb9fl2m9: "name", // Qual seu nome completo?
   vgt3oqqdaogjmeppsuyq2zn4: "email", // Qual seu e-mail?
   x69hbypuftyq99wb3x0drig8: "phone", // Qual seu Whatsapp?
@@ -33,21 +35,54 @@ function mapFormbricksData(body: any): Record<string, string> {
   return mappedData;
 }
 
-async function sendToDataCrazy(data: Record<string, string>) {
-  const response = await fetch(DATACRAZY_WEBHOOK_URL, {
+async function createLead(data: Record<string, string>) {
+  const payload: Record<string, any> = {
+    name: data.name || "Lead Formbricks",
+    source: "Formulário Enterprise - Formbricks",
+  };
+
+  if (data.email) payload.email = data.email;
+  if (data.phone) payload.phone = data.phone;
+  if (data.company) payload.company = data.company;
+  if (data.instagram) payload.instagram = data.instagram;
+
+  const notes: string[] = [];
+  if (data.cargo) notes.push(`Cargo: ${data.cargo}`);
+  if (data.faturamento) notes.push(`Faturamento: ${data.faturamento}`);
+  if (data.checkout) notes.push(`Checkout: ${data.checkout}`);
+  if (notes.length > 0) payload.notes = notes.join("\n");
+
+  const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
+    },
+    body: JSON.stringify(payload),
   });
 
-  const responseText = await response.text();
-  console.log("[DataCrazy Webhook] Status:", response.status, "Response:", responseText);
-
-  if (!response.ok) {
-    throw new Error(`DataCrazy webhook failed: ${response.status} - ${responseText}`);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Create lead failed: ${res.status} - ${err}`);
   }
+  return res.json();
+}
 
-  return responseText;
+async function createBusiness(leadId: string) {
+  const res = await fetch(`${DATACRAZY_API_URL}/businesses`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
+    },
+    body: JSON.stringify({ leadId, stageId: SDR_SMARTLEAD_STAGE_ID }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Create business failed: ${res.status} - ${err}`);
+  }
+  return res.json();
 }
 
 async function sendSlackNotification(data: Record<string, string>) {
@@ -63,72 +98,60 @@ async function sendSlackNotification(data: Record<string, string>) {
   if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
   if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
 
-  const payload = {
-    blocks: [
-      {
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: "🔥 Novo Lead — FirePay Enterprise",
-          emoji: true,
-        },
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: fields.join("\n"),
-        },
-      },
-      {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: `Recebido via <https://forms.firepay.com.br|Formbricks> em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
-          },
-        ],
-      },
-    ],
-  };
-
-  const response = await fetch(SLACK_WEBHOOK_URL, {
+  await fetch(SLACK_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "🔥 Novo Lead — FirePay Enterprise", emoji: true },
+        },
+        { type: "section", text: { type: "mrkdwn", text: fields.join("\n") } },
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: `Recebido via <https://forms.firepay.com.br|Formbricks> em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+            },
+          ],
+        },
+      ],
+    }),
   });
-
-  if (!response.ok) {
-    console.error(`[Slack] Failed: ${response.status} - ${await response.text()}`);
-  }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log("[DataCrazy Webhook] Received event:", body?.event);
+    console.log("[DataCrazy] Received event:", body?.event);
 
     const mappedData = mapFormbricksData(body);
-    console.log("[DataCrazy Webhook] Mapped data:", JSON.stringify(mappedData));
+    console.log("[DataCrazy] Mapped:", JSON.stringify(mappedData));
 
     if (!mappedData.name && !mappedData.email && !mappedData.phone) {
-      console.log("[DataCrazy Webhook] No lead data found, skipping");
       return NextResponse.json({ success: true, message: "No lead data found, skipped" });
     }
 
-    // 1. Send to DataCrazy native webhook (creates lead + business + custom fields)
-    await sendToDataCrazy(mappedData);
+    // 1. Create lead via API
+    const lead = await createLead(mappedData);
+    console.log("[DataCrazy] Lead created:", lead.id);
 
-    // 2. Send Slack notification
+    // 2. Create business in SDR > Smart Lead
+    const business = await createBusiness(lead.id);
+    console.log("[DataCrazy] Business created:", business.id);
+
+    // 3. Slack notification
     try {
       await sendSlackNotification(mappedData);
-    } catch (slackError) {
-      console.error("[Slack] Error:", slackError);
+    } catch (e) {
+      console.error("[Slack] Error:", e);
     }
 
-    return NextResponse.json({ success: true, ok: true });
+    return NextResponse.json({ success: true, leadId: lead.id, businessId: business.id });
   } catch (error) {
-    console.error("[DataCrazy Webhook] Error:", error);
+    console.error("[DataCrazy] Error:", error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
