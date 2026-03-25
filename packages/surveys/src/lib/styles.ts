@@ -441,6 +441,11 @@ export const addCustomThemeToDom = ({ styling }: { styling: TProjectStyling | TS
     );
   }
 
+  // Append custom CSS if provided
+  if ((styling as any).customCSS) {
+    cssVariables += `\n/* Custom CSS */\n${(styling as any).customCSS}\n`;
+  }
+
   // Set the innerHTML of the style element
   styleElement.innerHTML = cssVariables;
 };

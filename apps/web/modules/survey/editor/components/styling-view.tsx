@@ -299,6 +299,35 @@ export const StylingView = ({
             </>
           )}
 
+          {overwriteThemeStyling && (
+            <div className="rounded-lg border border-slate-300 bg-white p-4">
+              <FormField
+                control={form.control}
+                name="customCSS"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-base font-semibold text-slate-900">
+                      CSS Personalizado
+                    </FormLabel>
+                    <FormDescription className="text-sm text-slate-500">
+                      Insira CSS customizado para esta pesquisa. Use seletores como{" "}
+                      <code className="rounded bg-slate-100 px-1 text-xs">#fbjs</code> para escopo.
+                    </FormDescription>
+                    <FormControl>
+                      <textarea
+                        className="focus:border-brand-500 focus:ring-brand-500 mt-2 w-full rounded-md border border-slate-300 bg-slate-50 p-3 font-mono text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1"
+                        rows={6}
+                        placeholder={`/* Exemplo */\n#fbjs .space-y-6 {\n  gap: 8px;\n}`}
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value)}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </div>
+          )}
+
           {!isCxMode && (
             <div className="mt-4 flex h-8 items-center justify-between">
               <div>
