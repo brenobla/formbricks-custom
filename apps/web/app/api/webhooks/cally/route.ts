@@ -184,7 +184,7 @@ async function createBusiness(leadId: string, data: Partial<MappedData>) {
   return res.json();
 }
 
-async function sendSlackNotification(data: Partial<MappedData>, body: any) {
+async function sendSlackNotification(data: Partial<MappedData>, _body: any) {
   if (!SLACK_WEBHOOK_URL) return;
 
   const fields: string[] = [];
