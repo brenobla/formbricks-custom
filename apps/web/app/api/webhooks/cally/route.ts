@@ -17,8 +17,35 @@ function extractValue(val: any): string {
   return String(val);
 }
 
-function mapCallyData(body: any): Record<string, string> {
-  const mapped: Record<string, string> = {};
+function formatDateBR(dateStr: string): string {
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  } catch {
+    return dateStr;
+  }
+}
+
+interface MappedData {
+  name: string;
+  email: string;
+  phone: string;
+  checkout: string;
+  faturamento: string;
+  company: string;
+  // Booking data
+  bookingTitle: string;
+  bookingDate: string;
+  bookingStartTime: string;
+  bookingEndTime: string;
+  bookingLocation: string;
+  meetingUrl: string;
+  eventType: string;
+  organizer: string;
+}
+
+function mapCallyData(body: any): Partial<MappedData> {
+  const mapped: Partial<MappedData> = {};
 
   const payload = body?.payload || body;
   const attendee = payload?.attendees?.[0] || {};
@@ -48,11 +75,44 @@ function mapCallyData(body: any): Record<string, string> {
   const company = extractValue(responses.company);
   if (company) mapped.company = company;
 
+  // Booking / scheduling data
+  if (payload.title) mapped.bookingTitle = payload.title;
+  if (payload.startTime) mapped.bookingStartTime = payload.startTime;
+  if (payload.endTime) mapped.bookingEndTime = payload.endTime;
+  if (payload.startTime) mapped.bookingDate = formatDateBR(payload.startTime);
+
+  // Meeting URL — Cal.com puts it in metadata.videoCallUrl or in the location field
+  const videoCallUrl = payload.metadata?.videoCallUrl || payload.videoCallUrl || payload.meetingUrl || "";
+  if (videoCallUrl) mapped.meetingUrl = videoCallUrl;
+
+  // Location type
+  if (payload.location) mapped.bookingLocation = payload.location;
+
+  // Event type title
+  if (payload.type) mapped.eventType = payload.type;
+
+  // Organizer
+  const organizer = payload.organizer?.name || "";
+  if (organizer) mapped.organizer = organizer;
+
   console.log("[Cally] All responses:", JSON.stringify(responses));
+  console.log(
+    "[Cally] Booking data:",
+    JSON.stringify({
+      title: payload.title,
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+      location: payload.location,
+      videoCallUrl,
+      type: payload.type,
+      organizer: payload.organizer?.name,
+    })
+  );
+
   return mapped;
 }
 
-async function createLead(data: Record<string, string>) {
+async function createLead(data: Partial<MappedData>) {
   const payload: Record<string, any> = {
     name: data.name || "Lead Cally",
     source: "Cally - Agendamento",
@@ -62,9 +122,14 @@ async function createLead(data: Record<string, string>) {
   if (data.phone) payload.phone = data.phone;
   if (data.company) payload.company = data.company;
 
+  // Build notes with all info including booking data
   const notes: string[] = [];
   if (data.checkout) notes.push(`Checkout: ${data.checkout}`);
   if (data.faturamento) notes.push(`Faturamento: ${data.faturamento}`);
+  if (data.bookingTitle) notes.push(`Reunião: ${data.bookingTitle}`);
+  if (data.bookingDate) notes.push(`Data: ${data.bookingDate}`);
+  if (data.meetingUrl) notes.push(`Link: ${data.meetingUrl}`);
+  if (data.organizer) notes.push(`Organizador: ${data.organizer}`);
   if (notes.length > 0) payload.notes = notes.join("\n");
 
   const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
@@ -83,14 +148,33 @@ async function createLead(data: Record<string, string>) {
   return res.json();
 }
 
-async function createBusiness(leadId: string) {
+async function createBusiness(leadId: string, data: Partial<MappedData>) {
+  const businessPayload: Record<string, any> = {
+    leadId,
+    stageId: SDR_SMARTLEAD_STAGE_ID,
+  };
+
+  // Add booking info as business title and notes
+  if (data.bookingTitle) {
+    businessPayload.title = `${data.name || "Lead"} — ${data.bookingTitle}`;
+  }
+
+  const notes: string[] = [];
+  if (data.bookingDate) notes.push(`📅 Data: ${data.bookingDate}`);
+  if (data.meetingUrl) notes.push(`🔗 Link: ${data.meetingUrl}`);
+  if (data.bookingLocation) notes.push(`📍 Local: ${data.bookingLocation}`);
+  if (data.organizer) notes.push(`👤 Organizador: ${data.organizer}`);
+  if (data.checkout) notes.push(`💳 Checkout: ${data.checkout}`);
+  if (data.faturamento) notes.push(`💰 Faturamento: ${data.faturamento}`);
+  if (notes.length > 0) businessPayload.notes = notes.join("\n");
+
   const res = await fetch(`${DATACRAZY_API_URL}/businesses`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${DATACRAZY_TOKEN}`,
     },
-    body: JSON.stringify({ leadId, stageId: SDR_SMARTLEAD_STAGE_ID }),
+    body: JSON.stringify(businessPayload),
   });
 
   if (!res.ok) {
@@ -100,7 +184,7 @@ async function createBusiness(leadId: string) {
   return res.json();
 }
 
-async function sendSlackNotification(data: Record<string, string>, body: any) {
+async function sendSlackNotification(data: Partial<MappedData>, body: any) {
   if (!SLACK_WEBHOOK_URL) return;
 
   const fields: string[] = [];
@@ -110,13 +194,10 @@ async function sendSlackNotification(data: Record<string, string>, body: any) {
   if (data.company) fields.push(`*Empresa:* ${data.company}`);
   if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
   if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
-
-  const p = body?.payload || body;
-  if (p?.title) fields.push(`*Reunião:* ${p.title}`);
-  if (p?.startTime) {
-    const date = new Date(p.startTime);
-    fields.push(`*Data:* ${date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`);
-  }
+  if (data.bookingTitle) fields.push(`*Reunião:* ${data.bookingTitle}`);
+  if (data.bookingDate) fields.push(`*Data:* ${data.bookingDate}`);
+  if (data.meetingUrl) fields.push(`*Link:* ${data.meetingUrl}`);
+  if (data.organizer) fields.push(`*Organizador:* ${data.organizer}`);
 
   await fetch(SLACK_WEBHOOK_URL, {
     method: "POST",
@@ -142,7 +223,7 @@ async function sendSlackNotification(data: Record<string, string>, body: any) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log("[Cally Webhook] Received:", JSON.stringify(body).substring(0, 500));
+    console.log("[Cally Webhook] Received:", JSON.stringify(body).substring(0, 1000));
 
     const mappedData = mapCallyData(body);
     console.log("[Cally Webhook] Mapped:", JSON.stringify(mappedData));
@@ -155,11 +236,11 @@ export async function POST(request: NextRequest) {
     const lead = await createLead(mappedData);
     console.log("[Cally] Lead created:", lead.id);
 
-    // 2. Create business in SDR > Smart Lead
-    const business = await createBusiness(lead.id);
+    // 2. Create business in SDR > Smart Lead (now with booking data)
+    const business = await createBusiness(lead.id, mappedData);
     console.log("[Cally] Business created:", business.id);
 
-    // 3. Slack notification
+    // 3. Slack notification (now with booking data)
     try {
       await sendSlackNotification(mappedData, body);
     } catch (e) {
