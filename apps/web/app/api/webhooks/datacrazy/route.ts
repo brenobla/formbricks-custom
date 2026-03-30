@@ -131,6 +131,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     console.log("[DataCrazy] Received event:", body?.event);
 
+    // Only process responseFinished — ignore responseCreated/responseUpdated to avoid partial data
+    if (body?.event && body.event !== "responseFinished") {
+      console.log("[DataCrazy] Skipping event:", body.event);
+      return NextResponse.json({ success: true, message: `Skipped event: ${body.event}` });
+    }
+
     const mappedData = mapFormbricksData(body);
     console.log("[DataCrazy] Mapped:", JSON.stringify(mappedData));
 
