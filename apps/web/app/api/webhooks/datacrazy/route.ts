@@ -224,7 +224,6 @@ export async function POST(request: NextRequest) {
     // 3. Slack notification (only on finish or first creation)
     if (isFinished || !isUpdate) {
       try {
-        const title = isFinished ? (isUpdate ? "updated" : "created") : "partial";
         await sendSlackNotification(mappedData, isUpdate);
       } catch (e) {
         console.error("[Slack] Error:", e);
