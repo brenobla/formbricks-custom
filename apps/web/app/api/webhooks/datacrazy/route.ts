@@ -169,9 +169,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     console.log("[DataCrazy] Received event:", body?.event);
 
-    // Skip responseUpdated to avoid excessive updates
-    if (body?.event === "responseUpdated") {
-      return NextResponse.json({ success: true, message: "Skipped responseUpdated" });
+    // Only process responseFinished — skip responseCreated and responseUpdated to avoid duplicates
+    if (body?.event && body.event !== "responseFinished") {
+      return NextResponse.json({ success: true, message: `Skipped ${body.event}` });
     }
 
     const mappedData = mapFormbricksData(body);
