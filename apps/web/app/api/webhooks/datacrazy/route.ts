@@ -15,14 +15,19 @@ const DATACRAZY_WEBHOOK_URL =
 
 // Map Formbricks question IDs to field names
 const FIELD_MAP: Record<string, string> = {
-  blx7ixux827c5xrcrb9fl2m9: "name", // Qual seu nome completo?
-  vgt3oqqdaogjmeppsuyq2zn4: "email", // Qual seu e-mail?
-  x69hbypuftyq99wb3x0drig8: "phone", // Qual seu Whatsapp?
-  qziv755kb71axfzxsoo4n5rf: "company", // Qual a sua empresa?
-  gm8e6hcyhdetukw1f4whlcuc: "instagram", // Qual o Instagram da sua empresa?
-  ga04117jjo69bals1got7fng: "cargo", // Qual seu cargo atual?
-  w0v1d756qnzrdzj3b60qd84e: "faturamento", // Qual seu faturamento mensal?
-  rzg15b2mt47ea5h0imy4obpj: "checkout", // Qual checkout usa atualmente?
+  blx7ixux827c5xrcrb9fl2m9: "name",
+  vgt3oqqdaogjmeppsuyq2zn4: "email",
+  x69hbypuftyq99wb3x0drig8: "phone",
+  qziv755kb71axfzxsoo4n5rf: "company",
+  gm8e6hcyhdetukw1f4whlcuc: "instagram",
+  ga04117jjo69bals1got7fng: "cargo",
+  w0v1d756qnzrdzj3b60qd84e: "faturamento",
+  rzg15b2mt47ea5h0imy4obpj: "checkout",
+};
+
+const dcHeaders = {
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${DATACRAZY_TOKEN}`,
 };
 
 function mapFormbricksData(body: any): Record<string, string> {
@@ -39,7 +44,7 @@ function mapFormbricksData(body: any): Record<string, string> {
   return mappedData;
 }
 
-async function createLead(data: Record<string, string>) {
+function buildLeadPayload(data: Record<string, string>): Record<string, any> {
   const payload: Record<string, any> = {
     name: data.name || "Lead Formbricks",
     source: "Formulário Enterprise - Formbricks",
@@ -56,15 +61,43 @@ async function createLead(data: Record<string, string>) {
   if (data.checkout) notes.push(`Checkout: ${data.checkout}`);
   if (notes.length > 0) payload.notes = notes.join("\n");
 
-  const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
-    },
+  return payload;
+}
+
+async function findLeadByEmail(email: string): Promise<any | null> {
+  const res = await fetch(`${DATACRAZY_API_URL}/leads?email=${encodeURIComponent(email)}`, {
+    headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  // Find exact match in results
+  const leads = data?.data || [];
+  return leads.find((l: any) => l.email === email) || null;
+}
+
+async function updateLead(leadId: string, data: Record<string, string>): Promise<any> {
+  const payload = buildLeadPayload(data);
+  delete payload.source; // don't overwrite source on update
+
+  const res = await fetch(`${DATACRAZY_API_URL}/leads/${leadId}`, {
+    method: "PATCH",
+    headers: dcHeaders,
     body: JSON.stringify(payload),
   });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error(`[DataCrazy] Update lead failed: ${res.status} - ${err}`);
+    return null;
+  }
+  return res.json();
+}
 
+async function createLead(data: Record<string, string>): Promise<any> {
+  const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
+    method: "POST",
+    headers: dcHeaders,
+    body: JSON.stringify(buildLeadPayload(data)),
+  });
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Create lead failed: ${res.status} - ${err}`);
@@ -72,16 +105,22 @@ async function createLead(data: Record<string, string>) {
   return res.json();
 }
 
-async function createBusiness(leadId: string) {
+async function findBusinessByLead(leadId: string): Promise<any | null> {
+  const res = await fetch(`${DATACRAZY_API_URL}/businesses?leadId=${leadId}&limit=1`, {
+    headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const businesses = data?.data || [];
+  return businesses[0] || null;
+}
+
+async function createBusiness(leadId: string): Promise<any> {
   const res = await fetch(`${DATACRAZY_API_URL}/businesses`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
-    },
+    headers: dcHeaders,
     body: JSON.stringify({ leadId, stageId: SDR_SMARTLEAD_STAGE_ID }),
   });
-
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Create business failed: ${res.status} - ${err}`);
@@ -89,7 +128,7 @@ async function createBusiness(leadId: string) {
   return res.json();
 }
 
-async function sendSlackNotification(data: Record<string, string>) {
+async function sendSlackNotification(data: Record<string, string>, isUpdate: boolean) {
   if (!SLACK_WEBHOOK_URL) return;
 
   const fields: string[] = [];
@@ -102,15 +141,14 @@ async function sendSlackNotification(data: Record<string, string>) {
   if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
   if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
 
+  const title = isUpdate ? "🔄 Lead Atualizado — FirePay" : "🔥 Novo Lead — FirePay Enterprise";
+
   await fetch(SLACK_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       blocks: [
-        {
-          type: "header",
-          text: { type: "plain_text", text: "🔥 Novo Lead — FirePay Enterprise", emoji: true },
-        },
+        { type: "header", text: { type: "plain_text", text: title, emoji: true } },
         { type: "section", text: { type: "mrkdwn", text: fields.join("\n") } },
         {
           type: "context",
@@ -143,34 +181,74 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: "No lead data found, skipped" });
     }
 
-    // 1. Create lead via API (basic fields: name, email, phone, company, instagram)
-    const lead = await createLead(mappedData);
-    console.log("[DataCrazy] Lead created:", lead.id);
+    let leadId: string;
+    let isUpdate = false;
 
-    // 2. Create business in SDR > Smart Lead
-    const business = await createBusiness(lead.id);
-    console.log("[DataCrazy] Business created:", business.id);
+    // 1. Search for existing lead by email
+    if (mappedData.email) {
+      const existingLead = await findLeadByEmail(mappedData.email);
+      if (existingLead) {
+        // Update existing lead with new data
+        leadId = existingLead.id;
+        isUpdate = true;
+        await updateLead(leadId, mappedData);
+        console.log("[DataCrazy] Lead updated:", leadId);
+      } else {
+        // Create new lead
+        const lead = await createLead(mappedData);
+        leadId = lead.id;
+        console.log("[DataCrazy] Lead created:", leadId);
+      }
+    } else {
+      // No email — create new lead
+      const lead = await createLead(mappedData);
+      leadId = lead.id;
+      console.log("[DataCrazy] Lead created:", leadId);
+    }
 
-    // 3. Send to native webhook to populate custom/additional fields (Cargo, Faturamento, Checkout, etc.)
+    // 2. Create business only if lead doesn't already have one in SDR pipeline
+    let businessId: string | null = null;
+    if (!isUpdate) {
+      const business = await createBusiness(leadId);
+      businessId = business.id;
+      console.log("[DataCrazy] Business created:", businessId);
+    } else {
+      // Check if business exists, create if not
+      const existingBusiness = await findBusinessByLead(leadId);
+      if (!existingBusiness) {
+        const business = await createBusiness(leadId);
+        businessId = business.id;
+        console.log("[DataCrazy] Business created for existing lead:", businessId);
+      } else {
+        businessId = existingBusiness.id;
+        console.log("[DataCrazy] Business already exists:", businessId);
+      }
+    }
+
+    // 3. Send to native webhook for custom fields
     try {
-      const webhookRes = await fetch(DATACRAZY_WEBHOOK_URL, {
+      await fetch(DATACRAZY_WEBHOOK_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(mappedData),
       });
-      console.log("[DataCrazy] Native webhook status:", webhookRes.status);
     } catch (e) {
       console.error("[DataCrazy] Native webhook error:", e);
     }
 
     // 4. Slack notification
     try {
-      await sendSlackNotification(mappedData);
+      await sendSlackNotification(mappedData, isUpdate);
     } catch (e) {
       console.error("[Slack] Error:", e);
     }
 
-    return NextResponse.json({ success: true, leadId: lead.id, businessId: business.id });
+    return NextResponse.json({
+      success: true,
+      leadId,
+      businessId,
+      action: isUpdate ? "updated" : "created",
+    });
   } catch (error) {
     console.error("[DataCrazy] Error:", error);
     return NextResponse.json(
