@@ -196,20 +196,20 @@ export async function POST(request: NextRequest) {
       console.log(`[DataCrazy] Lead created: ${leadId} (${event})`);
     }
 
-    // 2. Create business ONLY on responseFinished
+    // 2. Create business if lead doesn't have one yet (on any event with email)
     let businessId: string | null = null;
-    if (isFinished) {
-      const existingBusiness = await findBusinessByLead(leadId);
-      if (!existingBusiness) {
-        const business = await createBusiness(leadId);
-        businessId = business.id;
-        console.log("[DataCrazy] Business created:", businessId);
-      } else {
-        businessId = existingBusiness.id;
-        console.log("[DataCrazy] Business already exists:", businessId);
-      }
+    const existingBusiness = await findBusinessByLead(leadId);
+    if (!existingBusiness) {
+      const business = await createBusiness(leadId);
+      businessId = business.id;
+      console.log("[DataCrazy] Business created:", businessId);
+    } else {
+      businessId = existingBusiness.id;
+      console.log("[DataCrazy] Business already exists:", businessId);
+    }
 
-      // Send to native webhook for custom fields (only on finish)
+    // 3. Send to native webhook for custom fields (only on finish, when all data is available)
+    if (isFinished) {
       try {
         await fetch(DATACRAZY_WEBHOOK_URL, {
           method: "POST",
