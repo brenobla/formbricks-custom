@@ -167,80 +167,68 @@ async function sendSlackNotification(data: Record<string, string>, isUpdate: boo
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log("[DataCrazy] Received event:", body?.event);
-
-    // Only process responseFinished — skip responseCreated and responseUpdated to avoid duplicates
-    if (body?.event && body.event !== "responseFinished") {
-      return NextResponse.json({ success: true, message: `Skipped ${body.event}` });
-    }
+    const event = body?.event || "unknown";
+    console.log("[DataCrazy] Received event:", event);
 
     const mappedData = mapFormbricksData(body);
     console.log("[DataCrazy] Mapped:", JSON.stringify(mappedData));
 
-    if (!mappedData.name && !mappedData.email && !mappedData.phone) {
-      return NextResponse.json({ success: true, message: "No lead data found, skipped" });
+    // Need at least email to do anything useful
+    if (!mappedData.email) {
+      console.log("[DataCrazy] No email yet, skipping");
+      return NextResponse.json({ success: true, message: "No email yet, skipped" });
     }
 
+    const isFinished = event === "responseFinished";
     let leadId: string;
     let isUpdate = false;
 
     // 1. Search for existing lead by email
-    if (mappedData.email) {
-      const existingLead = await findLeadByEmail(mappedData.email);
-      if (existingLead) {
-        // Update existing lead with new data
-        leadId = existingLead.id;
-        isUpdate = true;
-        await updateLead(leadId, mappedData);
-        console.log("[DataCrazy] Lead updated:", leadId);
-      } else {
-        // Create new lead
-        const lead = await createLead(mappedData);
-        leadId = lead.id;
-        console.log("[DataCrazy] Lead created:", leadId);
-      }
+    const existingLead = await findLeadByEmail(mappedData.email);
+    if (existingLead) {
+      leadId = existingLead.id;
+      isUpdate = true;
+      await updateLead(leadId, mappedData);
+      console.log(`[DataCrazy] Lead updated: ${leadId} (${event})`);
     } else {
-      // No email — create new lead
       const lead = await createLead(mappedData);
       leadId = lead.id;
-      console.log("[DataCrazy] Lead created:", leadId);
+      console.log(`[DataCrazy] Lead created: ${leadId} (${event})`);
     }
 
-    // 2. Create business only if lead doesn't already have one in SDR pipeline
+    // 2. Create business ONLY on responseFinished
     let businessId: string | null = null;
-    if (!isUpdate) {
-      const business = await createBusiness(leadId);
-      businessId = business.id;
-      console.log("[DataCrazy] Business created:", businessId);
-    } else {
-      // Check if business exists, create if not
+    if (isFinished) {
       const existingBusiness = await findBusinessByLead(leadId);
       if (!existingBusiness) {
         const business = await createBusiness(leadId);
         businessId = business.id;
-        console.log("[DataCrazy] Business created for existing lead:", businessId);
+        console.log("[DataCrazy] Business created:", businessId);
       } else {
         businessId = existingBusiness.id;
         console.log("[DataCrazy] Business already exists:", businessId);
       }
+
+      // Send to native webhook for custom fields (only on finish)
+      try {
+        await fetch(DATACRAZY_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mappedData),
+        });
+      } catch (e) {
+        console.error("[DataCrazy] Native webhook error:", e);
+      }
     }
 
-    // 3. Send to native webhook for custom fields
-    try {
-      await fetch(DATACRAZY_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mappedData),
-      });
-    } catch (e) {
-      console.error("[DataCrazy] Native webhook error:", e);
-    }
-
-    // 4. Slack notification
-    try {
-      await sendSlackNotification(mappedData, isUpdate);
-    } catch (e) {
-      console.error("[Slack] Error:", e);
+    // 3. Slack notification (only on finish or first creation)
+    if (isFinished || !isUpdate) {
+      try {
+        const title = isFinished ? (isUpdate ? "updated" : "created") : "partial";
+        await sendSlackNotification(mappedData, isUpdate);
+      } catch (e) {
+        console.error("[Slack] Error:", e);
+      }
     }
 
     return NextResponse.json({
@@ -248,6 +236,7 @@ export async function POST(request: NextRequest) {
       leadId,
       businessId,
       action: isUpdate ? "updated" : "created",
+      event,
     });
   } catch (error) {
     console.error("[DataCrazy] Error:", error);
