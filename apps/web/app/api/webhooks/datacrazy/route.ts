@@ -7,14 +7,11 @@ const DATACRAZY_API_URL = "https://api.g1.datacrazy.io/api/v1";
 const DATACRAZY_TOKEN =
   "dc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YmIyNzE2ODJlYTgwNWMyNDIzZjIwNCIsInRlbmFudElkIjoiODVlMjA3M2EtMzg4Ny00Y2QyLWFkODMtZjkwNTg0YTJhMzE0IiwibmFtZSI6IkZvcm1icmlja3MiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc0FkbWluIjp0cnVlLCJpYXQiOjE3NzM4NzI5MTgsImV4cCI6MTg0MTcxMzE5OX0.w-rnb8VgXq8Zqp0eQ8P0ZUVQKdjxSfJPtJOOjZqnd6k";
 
-// Pipeline SDR > Stage "Smart Lead"
 const SDR_SMARTLEAD_STAGE_ID = "76cbf3a7-07a2-4af7-9816-95c923630be2";
 
-// DataCrazy native webhook — populates custom/additional fields
 const DATACRAZY_WEBHOOK_URL =
   "https://api.datacrazy.io/v1/crm/api/crm/integrations/webhook/business/69b031f7-f44c-4cca-a33f-10e4f92b987e";
 
-// Map Formbricks question IDs to field names
 const FIELD_MAP: Record<string, string> = {
   blx7ixux827c5xrcrb9fl2m9: "name",
   vgt3oqqdaogjmeppsuyq2zn4: "email",
@@ -31,6 +28,28 @@ const dcHeaders = {
   Authorization: `Bearer ${DATACRAZY_TOKEN}`,
 };
 
+// ============================================================
+// Retry helper — retries up to 3 times with 1s delay
+// ============================================================
+async function withRetry<T>(fn: () => Promise<T>, label: string, retries = 3): Promise<T> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(`[${label}] Attempt ${i + 1}/${retries} failed:`, err);
+      if (i < retries - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error(`${label} failed after ${retries} retries`);
+}
+
+// ============================================================
+// Data mapping
+// ============================================================
 function mapFormbricksData(body: any): Record<string, string> {
   const responseData = body?.data?.data || body?.data?.response?.data || body?.data || {};
   const mappedData: Record<string, string> = {};
@@ -48,18 +67,12 @@ function mapFormbricksData(body: any): Record<string, string> {
   if (metaUrl) {
     try {
       const url = new URL(metaUrl);
-      const utmSource = url.searchParams.get("utm_source");
-      const utmCampaign = url.searchParams.get("utm_campaign");
-      const utmMedium = url.searchParams.get("utm_medium");
-      const utmContent = url.searchParams.get("utm_content");
-      const utmTerm = url.searchParams.get("utm_term");
-      if (utmSource) mappedData.utm_source = utmSource;
-      if (utmCampaign) mappedData.utm_campaign = utmCampaign;
-      if (utmMedium) mappedData.utm_medium = utmMedium;
-      if (utmContent) mappedData.utm_content = utmContent;
-      if (utmTerm) mappedData.utm_term = utmTerm;
+      for (const param of ["utm_source", "utm_campaign", "utm_medium", "utm_content", "utm_term"]) {
+        const val = url.searchParams.get(param);
+        if (val) mappedData[param] = val;
+      }
     } catch {
-      // URL parsing failed, skip UTMs
+      // ignore
     }
   }
 
@@ -69,18 +82,13 @@ function mapFormbricksData(body: any): Record<string, string> {
 function buildLeadPayload(data: Record<string, string>): Record<string, any> {
   const payload: Record<string, any> = {
     name: data.name || "Lead Formbricks",
-    source: "Formulário Enterprise - Formbricks",
+    source: data.utm_source || "Formulário Enterprise - Formbricks",
   };
 
   if (data.email) payload.email = data.email;
   if (data.phone) payload.phone = data.phone;
   if (data.company) payload.company = data.company;
   if (data.instagram) payload.instagram = data.instagram;
-
-  // Use utm_source as lead source if available
-  if (data.utm_source) {
-    payload.source = data.utm_source;
-  }
 
   const notes: string[] = [];
   if (data.cargo) notes.push(`Cargo: ${data.cargo}`);
@@ -96,71 +104,76 @@ function buildLeadPayload(data: Record<string, string>): Record<string, any> {
   return payload;
 }
 
+// ============================================================
+// DataCrazy API calls — all with retry
+// ============================================================
 async function findLeadByEmail(email: string): Promise<any | null> {
-  const res = await fetch(`${DATACRAZY_API_URL}/leads?email=${encodeURIComponent(email)}`, {
-    headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  // Find exact match in results
-  const leads = data?.data || [];
-  return leads.find((l: any) => l.email === email) || null;
+  try {
+    const res = await fetch(`${DATACRAZY_API_URL}/leads?email=${encodeURIComponent(email)}`, {
+      headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const leads = data?.data || [];
+    return leads.find((l: any) => l.email?.toLowerCase() === email.toLowerCase()) || null;
+  } catch (err) {
+    console.error("[DataCrazy] findLeadByEmail error:", err);
+    return null;
+  }
+}
+
+async function createLead(data: Record<string, string>): Promise<any> {
+  return withRetry(async () => {
+    const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
+      method: "POST",
+      headers: dcHeaders,
+      body: JSON.stringify(buildLeadPayload(data)),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`${res.status} - ${err}`);
+    }
+    return res.json();
+  }, "createLead");
 }
 
 async function updateLead(leadId: string, data: Record<string, string>): Promise<any> {
   const payload = buildLeadPayload(data);
-  delete payload.source; // don't overwrite source on update
-
-  const res = await fetch(`${DATACRAZY_API_URL}/leads/${leadId}`, {
-    method: "PATCH",
-    headers: dcHeaders,
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    console.error(`[DataCrazy] Update lead failed: ${res.status} - ${err}`);
+  delete payload.source;
+  try {
+    const res = await fetch(`${DATACRAZY_API_URL}/leads/${leadId}`, {
+      method: "PATCH",
+      headers: dcHeaders,
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error(`[DataCrazy] Update lead failed: ${res.status}`);
+    }
+    return res.ok ? res.json() : null;
+  } catch (err) {
+    console.error("[DataCrazy] updateLead error:", err);
     return null;
   }
-  return res.json();
-}
-
-async function createLead(data: Record<string, string>): Promise<any> {
-  const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
-    method: "POST",
-    headers: dcHeaders,
-    body: JSON.stringify(buildLeadPayload(data)),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Create lead failed: ${res.status} - ${err}`);
-  }
-  return res.json();
-}
-
-async function findBusinessByLead(leadId: string): Promise<any | null> {
-  // DataCrazy API ignores leadId filter, so we search in the SDR pipeline and match locally
-  const res = await fetch(`${DATACRAZY_API_URL}/businesses?stageId=${SDR_SMARTLEAD_STAGE_ID}&limit=100`, {
-    headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const businesses = data?.data || [];
-  return businesses.find((b: any) => b.lead?.id === leadId || b.leadId === leadId) || null;
 }
 
 async function createBusiness(leadId: string): Promise<any> {
-  const res = await fetch(`${DATACRAZY_API_URL}/businesses`, {
-    method: "POST",
-    headers: dcHeaders,
-    body: JSON.stringify({ leadId, stageId: SDR_SMARTLEAD_STAGE_ID }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Create business failed: ${res.status} - ${err}`);
-  }
-  return res.json();
+  return withRetry(async () => {
+    const res = await fetch(`${DATACRAZY_API_URL}/businesses`, {
+      method: "POST",
+      headers: dcHeaders,
+      body: JSON.stringify({ leadId, stageId: SDR_SMARTLEAD_STAGE_ID }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`${res.status} - ${err}`);
+    }
+    return res.json();
+  }, "createBusiness");
 }
 
+// ============================================================
+// Slack notification
+// ============================================================
 async function sendSlackNotification(data: Record<string, string>, isUpdate: boolean) {
   if (!SLACK_WEBHOOK_URL) return;
 
@@ -200,107 +213,120 @@ async function sendSlackNotification(data: Record<string, string>, isUpdate: boo
   });
 }
 
+// ============================================================
+// Main handler
+// ============================================================
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  let mappedData: Record<string, string> = {};
+  let event = "unknown";
+
   try {
     const body = await request.json();
-    const event = body?.event || "unknown";
-    console.log("[DataCrazy] Received event:", event);
+    event = body?.event || "unknown";
+    console.log("[DataCrazy] Event:", event);
 
-    const mappedData = mapFormbricksData(body);
+    mappedData = mapFormbricksData(body);
     console.log("[DataCrazy] Mapped:", JSON.stringify(mappedData));
 
-    // Need at least email to do anything useful
+    // Need at least email to proceed
     if (!mappedData.email) {
-      console.log("[DataCrazy] No email yet, skipping");
       return NextResponse.json({ success: true, message: "No email yet, skipped" });
     }
 
     const isFinished = event === "responseFinished";
+
+    // ============================
+    // STEP 1: Create or update lead (with retry)
+    // ============================
     let leadId: string;
     let isUpdate = false;
 
-    // 1. Search for existing lead by email
     const existingLead = await findLeadByEmail(mappedData.email);
     if (existingLead) {
       leadId = existingLead.id;
       isUpdate = true;
       await updateLead(leadId, mappedData);
-      console.log(`[DataCrazy] Lead updated: ${leadId} (${event})`);
+      console.log(`[DataCrazy] Lead updated: ${leadId}`);
     } else {
       const lead = await createLead(mappedData);
       leadId = lead.id;
-      console.log(`[DataCrazy] Lead created: ${leadId} (${event})`);
+      console.log(`[DataCrazy] Lead created: ${leadId}`);
     }
 
-    // 2. Create business if lead doesn't have one yet (on any event with email)
+    // ============================
+    // STEP 2: ALWAYS create business (with retry)
+    // Never skip — if createBusiness fails, retry handles it
+    // ============================
     let businessId: string | null = null;
-    const existingBusiness = await findBusinessByLead(leadId);
-    if (!existingBusiness) {
+    try {
       const business = await createBusiness(leadId);
       businessId = business.id;
       console.log("[DataCrazy] Business created:", businessId);
-    } else {
-      businessId = existingBusiness.id;
-      console.log("[DataCrazy] Business already exists:", businessId);
+    } catch (bizErr) {
+      // Business creation failed even after retries
+      // This can happen if business already exists (API may reject duplicates)
+      console.error("[DataCrazy] Business creation failed after retries:", bizErr);
+      // Don't fail the whole request — lead was already created
     }
 
-    // 3. Send to native webhook for custom fields (only on finish, when all data is available)
+    // ============================
+    // STEP 3: Native webhook for custom fields (non-blocking)
+    // ============================
     if (isFinished) {
-      try {
-        await fetch(DATACRAZY_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(mappedData),
-        });
-      } catch (e) {
-        console.error("[DataCrazy] Native webhook error:", e);
-      }
+      fetch(DATACRAZY_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mappedData),
+      }).catch((e) => console.error("[DataCrazy] Native webhook error:", e));
     }
 
-    // 3. Slack notification (only on finish or first creation)
+    // ============================
+    // STEP 4: Slack notification (non-blocking)
+    // ============================
     if (isFinished || !isUpdate) {
-      try {
-        await sendSlackNotification(mappedData, isUpdate);
-      } catch (e) {
-        console.error("[Slack] Error:", e);
-      }
+      sendSlackNotification(mappedData, isUpdate).catch((e) => console.error("[Slack] Error:", e));
     }
 
-    const result = { success: true, leadId, businessId, action: isUpdate ? "updated" : "created", event };
+    const result = {
+      success: true,
+      leadId,
+      businessId,
+      action: isUpdate ? "updated" : "created",
+      event,
+    };
 
-    // Log incoming webhook
     createWebhookLog({
       environmentId: "cmmwb6rme000anz01mwo85wps",
       direction: "incoming",
       source: "datacrazy",
       url: "/api/webhooks/datacrazy",
       event,
-      requestBody: {
-        mapped: mappedData,
-        utms: { utm_source: mappedData.utm_source, utm_campaign: mappedData.utm_campaign },
-      },
+      requestBody: mappedData,
       responseStatus: 200,
       responseBody: result,
+      durationMs: Date.now() - startTime,
       success: true,
     }).catch(() => {});
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error("[DataCrazy] Error:", error);
+    const errMsg = error instanceof Error ? error.message : "Unknown error";
+    console.error("[DataCrazy] FATAL:", errMsg);
 
     createWebhookLog({
       environmentId: "cmmwb6rme000anz01mwo85wps",
       direction: "incoming",
       source: "datacrazy",
       url: "/api/webhooks/datacrazy",
+      event,
+      requestBody: mappedData,
       responseStatus: 500,
+      durationMs: Date.now() - startTime,
       success: false,
-      errorMessage: error instanceof Error ? error.message : "Unknown error",
+      errorMessage: errMsg,
     }).catch(() => {});
 
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }
