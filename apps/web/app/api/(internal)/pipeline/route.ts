@@ -16,6 +16,7 @@ import { getResponseCountBySurveyId } from "@/lib/response/service";
 import { getSurvey, updateSurvey } from "@/lib/survey/service";
 import { convertDatesInObject } from "@/lib/time";
 import { validateWebhookUrl } from "@/lib/utils/validate-webhook-url";
+import { createWebhookLog } from "@/lib/webhookLog/service";
 import { queueAuditEvent } from "@/modules/ee/audit-logs/lib/handler";
 import { TAuditStatus, UNKNOWN_DATA } from "@/modules/ee/audit-logs/types/audit-log";
 import { recordResponseCreatedMeterEvent } from "@/modules/ee/billing/lib/metering";
@@ -137,6 +138,7 @@ export const POST = async (request: Request) => {
       );
     }
 
+    const startTime = Date.now();
     return validateWebhookUrl(webhook.url)
       .then(() =>
         fetchWithTimeout(webhook.url, {
@@ -145,7 +147,44 @@ export const POST = async (request: Request) => {
           body,
         })
       )
+      .then(async (res) => {
+        const durationMs = Date.now() - startTime;
+        let resBody: any = null;
+        try {
+          resBody = await res?.text();
+        } catch {}
+        createWebhookLog({
+          environmentId: inputValidation.data.environmentId,
+          direction: "outgoing",
+          source: "pipeline",
+          webhookId: webhook.id,
+          url: webhook.url,
+          event,
+          surveyId: inputValidation.data.surveyId,
+          requestBody: JSON.parse(body),
+          responseStatus: res?.status,
+          responseBody: resBody,
+          durationMs,
+          success: res?.ok ?? false,
+        }).catch(() => {});
+        return res;
+      })
       .catch((error) => {
+        const durationMs = Date.now() - startTime;
+        createWebhookLog({
+          environmentId: inputValidation.data.environmentId,
+          direction: "outgoing",
+          source: "pipeline",
+          webhookId: webhook.id,
+          url: webhook.url,
+          event,
+          surveyId: inputValidation.data.surveyId,
+          requestBody: JSON.parse(body),
+          responseStatus: 0,
+          durationMs,
+          success: false,
+          errorMessage: error instanceof Error ? error.message : "Unknown error",
+        }).catch(() => {});
         logger.error({ error, url: request.url }, `Webhook call to ${webhook.url} failed`);
       });
   });

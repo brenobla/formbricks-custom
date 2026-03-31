@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createWebhookLog } from "@/lib/webhookLog/service";
 
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 
@@ -41,6 +42,27 @@ function mapFormbricksData(body: any): Record<string, string> {
     }
   }
 
+  // Extract UTM params from response meta
+  const meta = body?.data?.meta || body?.data?.response?.meta || {};
+  const metaUrl = meta?.url || "";
+  if (metaUrl) {
+    try {
+      const url = new URL(metaUrl);
+      const utmSource = url.searchParams.get("utm_source");
+      const utmCampaign = url.searchParams.get("utm_campaign");
+      const utmMedium = url.searchParams.get("utm_medium");
+      const utmContent = url.searchParams.get("utm_content");
+      const utmTerm = url.searchParams.get("utm_term");
+      if (utmSource) mappedData.utm_source = utmSource;
+      if (utmCampaign) mappedData.utm_campaign = utmCampaign;
+      if (utmMedium) mappedData.utm_medium = utmMedium;
+      if (utmContent) mappedData.utm_content = utmContent;
+      if (utmTerm) mappedData.utm_term = utmTerm;
+    } catch {
+      // URL parsing failed, skip UTMs
+    }
+  }
+
   return mappedData;
 }
 
@@ -55,10 +77,20 @@ function buildLeadPayload(data: Record<string, string>): Record<string, any> {
   if (data.company) payload.company = data.company;
   if (data.instagram) payload.instagram = data.instagram;
 
+  // Use utm_source as lead source if available
+  if (data.utm_source) {
+    payload.source = data.utm_source;
+  }
+
   const notes: string[] = [];
   if (data.cargo) notes.push(`Cargo: ${data.cargo}`);
   if (data.faturamento) notes.push(`Faturamento: ${data.faturamento}`);
   if (data.checkout) notes.push(`Checkout: ${data.checkout}`);
+  if (data.utm_source) notes.push(`UTM Source: ${data.utm_source}`);
+  if (data.utm_campaign) notes.push(`UTM Campaign: ${data.utm_campaign}`);
+  if (data.utm_medium) notes.push(`UTM Medium: ${data.utm_medium}`);
+  if (data.utm_content) notes.push(`UTM Content: ${data.utm_content}`);
+  if (data.utm_term) notes.push(`UTM Term: ${data.utm_term}`);
   if (notes.length > 0) payload.notes = notes.join("\n");
 
   return payload;
@@ -140,6 +172,9 @@ async function sendSlackNotification(data: Record<string, string>, isUpdate: boo
   if (data.cargo) fields.push(`*Cargo:* ${data.cargo}`);
   if (data.faturamento) fields.push(`*Faturamento:* ${data.faturamento}`);
   if (data.checkout) fields.push(`*Checkout:* ${data.checkout}`);
+  if (data.utm_source) fields.push(`*UTM Source:* ${data.utm_source}`);
+  if (data.utm_campaign) fields.push(`*UTM Campaign:* ${data.utm_campaign}`);
+  if (data.utm_medium) fields.push(`*UTM Medium:* ${data.utm_medium}`);
 
   const title = isUpdate ? "🔄 Lead Atualizado — FirePay" : "🔥 Novo Lead — FirePay Enterprise";
 
@@ -230,15 +265,38 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      leadId,
-      businessId,
-      action: isUpdate ? "updated" : "created",
+    const result = { success: true, leadId, businessId, action: isUpdate ? "updated" : "created", event };
+
+    // Log incoming webhook
+    createWebhookLog({
+      environmentId: "cmmwb6rme000anz01mwo85wps",
+      direction: "incoming",
+      source: "datacrazy",
+      url: "/api/webhooks/datacrazy",
       event,
-    });
+      requestBody: {
+        mapped: mappedData,
+        utms: { utm_source: mappedData.utm_source, utm_campaign: mappedData.utm_campaign },
+      },
+      responseStatus: 200,
+      responseBody: result,
+      success: true,
+    }).catch(() => {});
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error("[DataCrazy] Error:", error);
+
+    createWebhookLog({
+      environmentId: "cmmwb6rme000anz01mwo85wps",
+      direction: "incoming",
+      source: "datacrazy",
+      url: "/api/webhooks/datacrazy",
+      responseStatus: 500,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
+    }).catch(() => {});
+
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

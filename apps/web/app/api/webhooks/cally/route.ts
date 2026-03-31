@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createWebhookLog } from "@/lib/webhookLog/service";
 
 const DATACRAZY_API_URL = "https://api.g1.datacrazy.io/api/v1";
 const DATACRAZY_TOKEN =
@@ -247,9 +248,35 @@ export async function POST(request: NextRequest) {
       console.error("[Cally→Slack] Error:", e);
     }
 
-    return NextResponse.json({ success: true, leadId: lead.id, businessId: business.id });
+    const result = { success: true, leadId: lead.id, businessId: business.id };
+
+    createWebhookLog({
+      environmentId: "cmmwb6rme000anz01mwo85wps",
+      direction: "incoming",
+      source: "cally",
+      url: "/api/webhooks/cally",
+      event: "BOOKING_CREATED",
+      requestBody: mappedData,
+      responseStatus: 200,
+      responseBody: result,
+      success: true,
+    }).catch(() => {});
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error("[Cally Webhook] Error:", error);
+
+    createWebhookLog({
+      environmentId: "cmmwb6rme000anz01mwo85wps",
+      direction: "incoming",
+      source: "cally",
+      url: "/api/webhooks/cally",
+      event: "BOOKING_CREATED",
+      responseStatus: 500,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
+    }).catch(() => {});
+
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

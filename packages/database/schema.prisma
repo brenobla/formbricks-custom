@@ -56,6 +56,29 @@ model Webhook {
   @@index([environmentId])
 }
 
+/// Logs all webhook dispatches and incoming webhook calls for auditing and debugging.
+model WebhookLog {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now()) @map(name: "created_at")
+  environmentId  String
+  direction      String // "outgoing" | "incoming"
+  source         String // "pipeline" | "datacrazy" | "cally" | "firepay"
+  webhookId      String?
+  url            String
+  event          String?
+  surveyId       String?
+  requestBody    Json?
+  responseStatus Int?
+  responseBody   Json?
+  durationMs     Int?
+  success        Boolean  @default(false)
+  errorMessage   String?
+
+  @@index([environmentId, createdAt(sort: Desc)])
+  @@index([source])
+  @@index([success])
+}
+
 /// Represents an attribute value associated with a contact.
 /// Used to store custom properties and characteristics of contacts.
 ///

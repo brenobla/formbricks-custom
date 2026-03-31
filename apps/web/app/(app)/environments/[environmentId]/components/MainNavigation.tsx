@@ -9,6 +9,7 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   RocketIcon,
+  ScrollText,
   UserCircleIcon,
   UserIcon,
   WorkflowIcon,
@@ -122,6 +123,12 @@ export const MainNavigation = ({
         icon: WorkflowIcon,
         isActive: pathname?.includes("/workflows"),
         isHidden: !isFormbricksCloud,
+      },
+      {
+        name: "Logs",
+        href: `/environments/${environment.id}/logs`,
+        icon: ScrollText,
+        isActive: pathname?.includes("/logs"),
       },
       {
         name: t("common.configuration"),
