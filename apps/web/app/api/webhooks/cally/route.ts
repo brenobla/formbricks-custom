@@ -43,6 +43,10 @@ interface MappedData {
   meetingUrl: string;
   eventType: string;
   organizer: string;
+  // UTMs
+  utm_source: string;
+  utm_campaign: string;
+  utm_medium: string;
 }
 
 function mapCallyData(body: any): Partial<MappedData> {
@@ -96,6 +100,19 @@ function mapCallyData(body: any): Partial<MappedData> {
   const organizer = payload.organizer?.name || "";
   if (organizer) mapped.organizer = organizer;
 
+  // UTMs — Cal.com can pass these in metadata or booking URL
+  const metadata = payload.metadata || {};
+  if (metadata.utm_source) mapped.utm_source = metadata.utm_source;
+  if (metadata.utm_campaign) mapped.utm_campaign = metadata.utm_campaign;
+  if (metadata.utm_medium) mapped.utm_medium = metadata.utm_medium;
+  // Also check responses for UTMs
+  const utmSource = extractValue(responses.utm_source);
+  const utmCampaign = extractValue(responses.utm_campaign);
+  const utmMedium = extractValue(responses.utm_medium);
+  if (utmSource) mapped.utm_source = utmSource;
+  if (utmCampaign) mapped.utm_campaign = utmCampaign;
+  if (utmMedium) mapped.utm_medium = utmMedium;
+
   console.log("[Cally] All responses:", JSON.stringify(responses));
   console.log(
     "[Cally] Booking data:",
@@ -116,7 +133,7 @@ function mapCallyData(body: any): Partial<MappedData> {
 async function createLead(data: Partial<MappedData>) {
   const payload: Record<string, any> = {
     name: data.name || "Lead Cally",
-    source: "Cally - Agendamento",
+    source: data.utm_source || "Cally - Agendamento",
   };
 
   if (data.email) payload.email = data.email;
@@ -131,6 +148,9 @@ async function createLead(data: Partial<MappedData>) {
   if (data.bookingDate) notes.push(`Data: ${data.bookingDate}`);
   if (data.meetingUrl) notes.push(`Link: ${data.meetingUrl}`);
   if (data.organizer) notes.push(`Organizador: ${data.organizer}`);
+  if (data.utm_source) notes.push(`UTM Source: ${data.utm_source}`);
+  if (data.utm_campaign) notes.push(`UTM Campaign: ${data.utm_campaign}`);
+  if (data.utm_medium) notes.push(`UTM Medium: ${data.utm_medium}`);
   if (notes.length > 0) payload.notes = notes.join("\n");
 
   const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
@@ -199,6 +219,9 @@ async function sendSlackNotification(data: Partial<MappedData>, _body: any) {
   if (data.bookingDate) fields.push(`*Data:* ${data.bookingDate}`);
   if (data.meetingUrl) fields.push(`*Link:* ${data.meetingUrl}`);
   if (data.organizer) fields.push(`*Organizador:* ${data.organizer}`);
+  if (data.utm_source) fields.push(`*UTM Source:* ${data.utm_source}`);
+  if (data.utm_campaign) fields.push(`*UTM Campaign:* ${data.utm_campaign}`);
+  if (data.utm_medium) fields.push(`*UTM Medium:* ${data.utm_medium}`);
 
   await fetch(SLACK_WEBHOOK_URL, {
     method: "POST",
