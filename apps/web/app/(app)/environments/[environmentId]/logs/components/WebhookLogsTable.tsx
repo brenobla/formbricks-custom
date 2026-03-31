@@ -6,7 +6,7 @@ import { getWebhookLogsAction } from "../actions";
 
 interface WebhookLog {
   id: string;
-  createdAt: string;
+  createdAt: string | Date;
   direction: string;
   source: string;
   url: string;
@@ -52,7 +52,7 @@ export function WebhookLogsTable({ environmentId, initialData }: Props) {
       if (successFilter === "false") filters.success = false;
 
       const result = await getWebhookLogsAction(environmentId, filters);
-      setLogs(result.data as WebhookLog[]);
+      setLogs(result.data as unknown as WebhookLog[]);
       setTotal(result.total);
       setPage(result.page);
       setTotalPages(result.totalPages);
@@ -66,7 +66,7 @@ export function WebhookLogsTable({ environmentId, initialData }: Props) {
     fetchLogs(1);
   }, [direction, source, successFilter]);
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr: string | Date) => {
     return new Date(dateStr).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
   };
 
