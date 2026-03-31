@@ -138,13 +138,14 @@ async function createLead(data: Record<string, string>): Promise<any> {
 }
 
 async function findBusinessByLead(leadId: string): Promise<any | null> {
-  const res = await fetch(`${DATACRAZY_API_URL}/businesses?leadId=${leadId}&limit=1`, {
+  // DataCrazy API ignores leadId filter, so we search in the SDR pipeline and match locally
+  const res = await fetch(`${DATACRAZY_API_URL}/businesses?stageId=${SDR_SMARTLEAD_STAGE_ID}&limit=100`, {
     headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
   });
   if (!res.ok) return null;
   const data = await res.json();
   const businesses = data?.data || [];
-  return businesses[0] || null;
+  return businesses.find((b: any) => b.lead?.id === leadId || b.leadId === leadId) || null;
 }
 
 async function createBusiness(leadId: string): Promise<any> {
