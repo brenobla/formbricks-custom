@@ -66,8 +66,12 @@ function mapCallyData(body: any): Partial<MappedData> {
   if (nameResp) mapped.name = nameResp;
   if (emailResp) mapped.email = emailResp;
 
-  // Phone/WhatsApp
-  const phone = extractValue(responses.phone);
+  // Phone/WhatsApp — Cally usa o identificador "attendeePhoneNumber" para o campo Phone
+  const phone =
+    extractValue(responses.attendeePhoneNumber) ||
+    extractValue(responses.phone) ||
+    extractValue(attendee.phoneNumber) ||
+    extractValue(attendee.phone);
   if (phone) mapped.phone = phone;
 
   // Custom fields
