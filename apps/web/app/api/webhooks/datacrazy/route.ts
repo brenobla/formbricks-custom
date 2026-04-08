@@ -47,6 +47,14 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, retries = 3): P
   throw new Error(`${label} failed after ${retries} retries`);
 }
 
+// Garante que o telefone começa com +55 (Brasil)
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (phone.startsWith("+")) return phone;
+  if (digits.startsWith("55") && digits.length >= 12) return `+${digits}`;
+  return `+55${digits}`;
+}
+
 // ============================================================
 // Data mapping
 // ============================================================
@@ -86,7 +94,7 @@ function buildLeadPayload(data: Record<string, string>): Record<string, any> {
   };
 
   if (data.email) payload.email = data.email;
-  if (data.phone) payload.phone = data.phone;
+  if (data.phone) payload.phone = normalizePhone(data.phone);
   if (data.company) payload.company = data.company;
   if (data.instagram) payload.instagram = data.instagram;
 

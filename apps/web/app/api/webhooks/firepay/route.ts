@@ -10,6 +10,14 @@ const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 const PIPELINE_ID = "a0dac4ab-4317-4aa8-b3af-c065770d073a";
 const STAGE_EFETIVADO_ID = "b28288a3-f256-4749-b39d-2a888c04e48d";
 
+// Garante que o telefone começa com +55 (Brasil)
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (phone.startsWith("+")) return phone;
+  if (digits.startsWith("55") && digits.length >= 12) return `+${digits}`;
+  return `+55${digits}`;
+}
+
 // --- DataCrazy API helpers ---
 
 async function searchLeadByEmail(email: string): Promise<any | null> {
@@ -172,7 +180,7 @@ export async function POST(request: NextRequest) {
 
     const clientEmail = body.client?.email;
     const clientName = body.client?.name || "Cliente FirePay";
-    const clientPhone = body.client?.phone || "";
+    const clientPhone = body.client?.phone ? normalizePhone(body.client.phone) : "";
     const clientDocument = body.client?.document || "";
     const productName = body.product?.name || "Produto FirePay";
     const price = body.price || 0;

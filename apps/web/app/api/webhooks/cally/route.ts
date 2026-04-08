@@ -18,6 +18,14 @@ function extractValue(val: any): string {
   return String(val);
 }
 
+// Garante que o telefone começa com +55 (Brasil)
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (phone.startsWith("+")) return phone; // já tem código de país
+  if (digits.startsWith("55") && digits.length >= 12) return `+${digits}`;
+  return `+55${digits}`;
+}
+
 function formatDateBR(dateStr: string): string {
   try {
     const date = new Date(dateStr);
@@ -67,12 +75,12 @@ function mapCallyData(body: any): Partial<MappedData> {
   if (emailResp) mapped.email = emailResp;
 
   // Phone/WhatsApp — Cally usa o identificador "attendeePhoneNumber" para o campo Phone
-  const phone =
+  const rawPhone =
     extractValue(responses.attendeePhoneNumber) ||
     extractValue(responses.phone) ||
     extractValue(attendee.phoneNumber) ||
     extractValue(attendee.phone);
-  if (phone) mapped.phone = phone;
+  if (rawPhone) mapped.phone = normalizePhone(rawPhone);
 
   // Custom fields
   const checkout = extractValue(responses.checkout);
