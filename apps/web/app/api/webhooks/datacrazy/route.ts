@@ -59,6 +59,7 @@ function normalizePhone(phone: string): string {
 // Data mapping
 // ============================================================
 function mapFormbricksData(body: any): Record<string, string> {
+  // Pipeline payload: { webhookId, event, data: { ...response, data: {...}, survey: { title } } }
   const responseData = body?.data?.data || body?.data?.response?.data || body?.data || {};
   const mappedData: Record<string, string> = {};
 
@@ -69,8 +70,12 @@ function mapFormbricksData(body: any): Record<string, string> {
     }
   }
 
-  // Extract UTM params from response meta
-  const meta = body?.data?.meta || body?.data?.response?.meta || {};
+  // Extract form/survey name
+  const surveyTitle = body?.data?.survey?.title || body?.survey?.title || "";
+  if (surveyTitle) mappedData["formName"] = surveyTitle;
+
+  // Extract UTM params from response meta — meta is at body.data.meta (TResponse.meta)
+  const meta = body?.data?.meta || body?.meta || body?.data?.response?.meta || {};
   const metaUrl = meta?.url || "";
   if (metaUrl) {
     try {
@@ -84,13 +89,16 @@ function mapFormbricksData(body: any): Record<string, string> {
     }
   }
 
+  // Log for debugging
+  console.log("[DataCrazy] meta.url:", metaUrl, "| surveyTitle:", surveyTitle);
+
   return mappedData;
 }
 
 function buildLeadPayload(data: Record<string, string>): Record<string, any> {
   const payload: Record<string, any> = {
     name: data.name || "Lead Formbricks",
-    source: data.utm_source || "Formulário Enterprise - Formbricks",
+    source: data.utm_source || data.formName || "Formulário Enterprise - Formbricks",
   };
 
   if (data.email) payload.email = data.email;
@@ -99,6 +107,7 @@ function buildLeadPayload(data: Record<string, string>): Record<string, any> {
   if (data.instagram) payload.instagram = data.instagram;
 
   const notes: string[] = [];
+  if (data.formName) notes.push(`Formulário: ${data.formName}`);
   if (data.cargo) notes.push(`Cargo: ${data.cargo}`);
   if (data.faturamento) notes.push(`Faturamento: ${data.faturamento}`);
   if (data.checkout) notes.push(`Checkout: ${data.checkout}`);
@@ -186,6 +195,7 @@ async function sendSlackNotification(data: Record<string, string>, isUpdate: boo
   if (!SLACK_WEBHOOK_URL) return;
 
   const fields: string[] = [];
+  if (data.formName) fields.push(`*Formulário:* ${data.formName}`);
   if (data.name) fields.push(`*Nome:* ${data.name}`);
   if (data.email) fields.push(`*Email:* ${data.email}`);
   if (data.phone) fields.push(`*WhatsApp:* ${data.phone}`);
@@ -197,6 +207,8 @@ async function sendSlackNotification(data: Record<string, string>, isUpdate: boo
   if (data.utm_source) fields.push(`*UTM Source:* ${data.utm_source}`);
   if (data.utm_campaign) fields.push(`*UTM Campaign:* ${data.utm_campaign}`);
   if (data.utm_medium) fields.push(`*UTM Medium:* ${data.utm_medium}`);
+  if (data.utm_content) fields.push(`*UTM Content:* ${data.utm_content}`);
+  if (data.utm_term) fields.push(`*UTM Term:* ${data.utm_term}`);
 
   const title = isUpdate ? "🔄 Lead Atualizado — FirePay" : "🔥 Novo Lead — FirePay Enterprise";
 
