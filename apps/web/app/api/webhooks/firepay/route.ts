@@ -183,7 +183,7 @@ export async function POST(request: NextRequest) {
     const clientPhone = body.client?.phone ? normalizePhone(body.client.phone) : "";
     const clientDocument = body.client?.document || "";
     const productName = body.product?.name || "Produto FirePay";
-    const price = body.price || 0;
+    const price = body.price ? body.price / 100 : 0;
     const paymentMethod = body.payment_method || "";
 
     if (!clientEmail) {
