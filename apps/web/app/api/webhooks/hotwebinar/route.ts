@@ -12,6 +12,8 @@ const STATUS_MAP: Record<string, { emoji: string; label: string }> = {
   refunded: { emoji: "↩️", label: "Reembolso" },
   chargeback: { emoji: "⚠️", label: "Chargeback" },
   expired: { emoji: "⏰", label: "Expirado" },
+  waiting: { emoji: "🎁", label: "Trial" },
+  trial: { emoji: "🎁", label: "Trial" },
 };
 
 function normalizePhone(phone: string): string {
