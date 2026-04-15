@@ -12,7 +12,7 @@ const STATUS_MAP: Record<string, { emoji: string; label: string }> = {
   refunded: { emoji: "↩️", label: "Reembolso" },
   chargeback: { emoji: "⚠️", label: "Chargeback" },
   expired: { emoji: "⏰", label: "Expirado" },
-  waiting: { emoji: "🎁", label: "Trial" },
+  waiting: { emoji: "⏳", label: "Waiting" },
   trial: { emoji: "🎁", label: "Trial" },
 };
 
