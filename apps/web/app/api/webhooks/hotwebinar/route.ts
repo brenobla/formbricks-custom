@@ -100,6 +100,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     console.log("[Hotwebinar Webhook] Received:", JSON.stringify(body, null, 2));
 
+    const ignoredStatuses = ["processing", "waiting"];
+    if (ignoredStatuses.includes(body.status)) {
+      console.log(`[Hotwebinar Webhook] Ignoring status: ${body.status}`);
+      return NextResponse.json({ success: true, message: `Ignored status: ${body.status}` });
+    }
+
     await sendSlackNotification(body);
 
     return NextResponse.json({ success: true });
