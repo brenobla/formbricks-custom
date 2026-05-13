@@ -74,6 +74,20 @@ async function saveEvent(body: any) {
   }
 }
 
+function extractUtms(body: any): Record<string, string> {
+  // FirePay pode enviar UTMs no nível raiz, em metadata ou em tracking
+  const sources = [body, body.metadata, body.tracking, body.utm];
+  const keys = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
+  const result: Record<string, string> = {};
+  for (const src of sources) {
+    if (!src || typeof src !== "object") continue;
+    for (const key of keys) {
+      if (!result[key] && src[key]) result[key] = String(src[key]);
+    }
+  }
+  return result;
+}
+
 async function sendSlackNotification(body: any) {
   if (!SLACK_HOTWEBINAR_WEBHOOK_URL) {
     console.warn("[Hotwebinar] SLACK_HOTWEBINAR_WEBHOOK_URL not set, skipping notification");
@@ -104,34 +118,59 @@ async function sendSlackNotification(body: any) {
     `*Checkout ID:* ${checkoutId}`,
   ];
 
-  const payload = {
-    blocks: [
-      {
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: `${statusInfo.emoji} ${statusInfo.label} — Hotwebinar`,
-          emoji: true,
-        },
+  // UTMs — só adiciona o bloco se houver ao menos uma UTM
+  const utms = extractUtms(body);
+  const utmLabels: Record<string, string> = {
+    utm_source: "Source",
+    utm_medium: "Medium",
+    utm_campaign: "Campaign",
+    utm_term: "Term",
+    utm_content: "Content",
+  };
+  const utmFields = Object.entries(utmLabels)
+    .filter(([key]) => utms[key])
+    .map(([key, label]) => `*UTM ${label}:* ${utms[key]}`);
+
+  const blocks: any[] = [
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: `${statusInfo.emoji} ${statusInfo.label} — Hotwebinar`,
+        emoji: true,
       },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: fields.join("\n"),
-        },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: fields.join("\n"),
       },
+    },
+  ];
+
+  if (utmFields.length > 0) {
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `🔗 *UTMs*\n${utmFields.join("\n")}`,
+      },
+    });
+  }
+
+  blocks.push({
+    type: "context",
+    elements: [
       {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: `Recebido via FirePay em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
-          },
-        ],
+        type: "mrkdwn",
+        text: `Recebido via FirePay em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
       },
     ],
-  };
+  });
+
+  const payload = { blocks };
 
   const res = await fetch(SLACK_HOTWEBINAR_WEBHOOK_URL, {
     method: "POST",
