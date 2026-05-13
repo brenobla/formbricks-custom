@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@formbricks/database";
 
 const SLACK_HOTWEBINAR_WEBHOOK_URL = process.env.SLACK_HOTWEBINAR_WEBHOOK_URL || "";
 
@@ -36,6 +37,41 @@ function normalizePhone(phone: string): string {
   if (phone.startsWith("+")) return phone;
   if (digits.startsWith("55") && digits.length >= 12) return `+${digits}`;
   return `+55${digits}`;
+}
+
+// Garante que a tabela existe (cria na primeira execução)
+async function ensureTable() {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS _hotwebinar_events (
+      id          SERIAL PRIMARY KEY,
+      checkout_id TEXT,
+      status      TEXT NOT NULL,
+      client_email TEXT,
+      client_name  TEXT,
+      product_name TEXT,
+      price_brl    NUMERIC(10,2),
+      received_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+async function saveEvent(body: any) {
+  try {
+    await ensureTable();
+    const price = body.price ? body.price / 100 : null;
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO _hotwebinar_events (checkout_id, status, client_email, client_name, product_name, price_brl)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      String(body.checkout_id || body.id || ""),
+      body.status || "unknown",
+      body.client?.email || null,
+      body.client?.name || null,
+      body.product?.name || null,
+      price
+    );
+  } catch (e) {
+    console.error("[Hotwebinar DB] Error saving event:", e);
+  }
 }
 
 async function sendSlackNotification(body: any) {
@@ -127,7 +163,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: "Duplicate ignored" });
     }
 
-    await sendSlackNotification(body);
+    // Salva no banco e notifica Slack em paralelo
+    await Promise.all([saveEvent(body), sendSlackNotification(body)]);
 
     return NextResponse.json({ success: true });
   } catch (error) {
