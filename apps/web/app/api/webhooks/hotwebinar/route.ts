@@ -16,6 +16,21 @@ const STATUS_MAP: Record<string, { emoji: string; label: string }> = {
   trial: { emoji: "🎁", label: "Trial" },
 };
 
+// Deduplication: ignora o mesmo checkout_id+status recebido dentro de 5 minutos
+const processedEvents = new Map<string, number>();
+const DEDUP_TTL_MS = 5 * 60 * 1000;
+
+function isDuplicate(checkoutId: string | number, status: string): boolean {
+  const key = `${checkoutId}:${status}`;
+  const now = Date.now();
+  for (const [k, ts] of processedEvents.entries()) {
+    if (now - ts > DEDUP_TTL_MS) processedEvents.delete(k);
+  }
+  if (processedEvents.has(key)) return true;
+  processedEvents.set(key, now);
+  return false;
+}
+
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (phone.startsWith("+")) return phone;
@@ -104,6 +119,12 @@ export async function POST(request: NextRequest) {
     if (ignoredStatuses.includes(body.status)) {
       console.log(`[Hotwebinar Webhook] Ignoring status: ${body.status}`);
       return NextResponse.json({ success: true, message: `Ignored status: ${body.status}` });
+    }
+
+    const checkoutId = body.checkout_id || body.id;
+    if (isDuplicate(checkoutId, body.status)) {
+      console.log(`[Hotwebinar Webhook] Duplicate ignored: checkout_id=${checkoutId} status=${body.status}`);
+      return NextResponse.json({ success: true, message: "Duplicate ignored" });
     }
 
     await sendSlackNotification(body);
