@@ -1,16 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const DATACRAZY_API_URL = "https://api.g1.datacrazy.io/api/v1";
-const DATACRAZY_TOKEN =
-  "dc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YmIyNzE2ODJlYTgwNWMyNDIzZjIwNCIsInRlbmFudElkIjoiODVlMjA3M2EtMzg4Ny00Y2QyLWFkODMtZjkwNTg0YTJhMzE0IiwibmFtZSI6IkZvcm1icmlja3MiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc0FkbWluIjp0cnVlLCJpYXQiOjE3NzM4NzI5MTgsImV4cCI6MTg0MTcxMzE5OX0.w-rnb8VgXq8Zqp0eQ8P0ZUVQKdjxSfJPtJOOjZqnd6k";
-
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 
-// Pipeline Vendas
-const PIPELINE_ID = "a0dac4ab-4317-4aa8-b3af-c065770d073a";
-const STAGE_EFETIVADO_ID = "b28288a3-f256-4749-b39d-2a888c04e48d";
-
-// Garante que o telefone começa com +55 (Brasil)
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (phone.startsWith("+")) return phone;
@@ -18,233 +9,90 @@ function normalizePhone(phone: string): string {
   return `+55${digits}`;
 }
 
-// --- DataCrazy API helpers ---
-
-async function searchLeadByEmail(email: string): Promise<any | null> {
-  const res = await fetch(`${DATACRAZY_API_URL}/leads?search=${encodeURIComponent(email)}`, {
-    headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  // Find exact email match
-  const lead = data.data?.find((l: any) => l.email?.toLowerCase() === email.toLowerCase());
-  return lead || null;
-}
-
-async function createLead(payload: Record<string, any>): Promise<any> {
-  const res = await fetch(`${DATACRAZY_API_URL}/leads`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
-    },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`DataCrazy create lead failed: ${res.status} - ${error}`);
-  }
-  return res.json();
-}
-
-async function getBusinessesByLead(leadId: string): Promise<any[]> {
-  const res = await fetch(`${DATACRAZY_API_URL}/businesses?leadId=${leadId}&pipelineId=${PIPELINE_ID}`, {
-    headers: { Authorization: `Bearer ${DATACRAZY_TOKEN}` },
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.data || [];
-}
-
-async function moveBusinessToStage(businessId: string, stageId: string, total?: number): Promise<any> {
-  const body: Record<string, any> = { stageId };
-  if (total !== undefined) body.total = total;
-
-  const res = await fetch(`${DATACRAZY_API_URL}/businesses/${businessId}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`DataCrazy move business failed: ${res.status} - ${error}`);
-  }
-  return res.json();
-}
-
-async function createBusiness(leadId: string, stageId: string, total?: number): Promise<any> {
-  const body: Record<string, any> = { leadId, stageId };
-  if (total !== undefined) body.total = total;
-
-  const res = await fetch(`${DATACRAZY_API_URL}/businesses`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${DATACRAZY_TOKEN}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`DataCrazy create business failed: ${res.status} - ${error}`);
-  }
-  return res.json();
-}
-
-// --- Slack notification ---
-
-async function sendSlackSaleNotification(sale: {
+async function sendSlackNotification(sale: {
   clientName: string;
   clientEmail: string;
+  clientPhone: string;
   productName: string;
-  price: number | string;
+  price: number;
   paymentMethod: string;
-  action: string;
+  checkoutId: string | number;
 }) {
   if (!SLACK_WEBHOOK_URL) return;
 
-  const formattedPrice =
-    typeof sale.price === "number"
-      ? sale.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
-      : sale.price;
+  const formattedPrice = sale.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-  const payload = {
-    blocks: [
-      {
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: "💰 Venda Realizada — FirePay",
-          emoji: true,
+  await fetch(SLACK_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "💰 Venda Realizada — FirePay", emoji: true },
         },
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: [
-            `*Cliente:* ${sale.clientName}`,
-            `*Email:* ${sale.clientEmail}`,
-            `*Produto:* ${sale.productName}`,
-            `*Valor:* ${formattedPrice}`,
-            `*Pagamento:* ${sale.paymentMethod}`,
-            `*Ação:* ${sale.action}`,
-          ].join("\n"),
-        },
-      },
-      {
-        type: "context",
-        elements: [
-          {
+        {
+          type: "section",
+          text: {
             type: "mrkdwn",
-            text: `Recebido via FirePay em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+            text: [
+              `*Cliente:* ${sale.clientName}`,
+              `*Email:* ${sale.clientEmail}`,
+              `*Telefone:* ${sale.clientPhone || "—"}`,
+              `*Produto:* ${sale.productName}`,
+              `*Valor:* ${formattedPrice}`,
+              `*Pagamento:* ${sale.paymentMethod || "—"}`,
+              `*Checkout ID:* ${sale.checkoutId}`,
+            ].join("\n"),
           },
-        ],
-      },
-    ],
-  };
-
-  try {
-    const res = await fetch(SLACK_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) console.error(`[Slack] Failed: ${res.status} - ${await res.text()}`);
-    else console.log("[Slack] Sale notification sent");
-  } catch (e) {
-    console.error("[Slack] Error:", e);
-  }
+        },
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: `Recebido via FirePay em ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+            },
+          ],
+        },
+      ],
+    }),
+  });
 }
-
-// --- Main webhook handler ---
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-
     console.log("[FirePay Webhook] Received:", JSON.stringify(body, null, 2));
 
-    // FirePay webhook payload structure:
-    // { id, checkout_id, type, status, payment_method, price, product: {name}, client: {name, email, phone, document}, ... }
     const txStatus = body.status;
-
-    // Only process "paid" events
     if (txStatus !== "paid") {
       console.log(`[FirePay Webhook] Ignoring status: ${txStatus}`);
       return NextResponse.json({ success: true, message: `Ignored status: ${txStatus}` });
     }
 
     const clientEmail = body.client?.email;
-    const clientName = body.client?.name || "Cliente FirePay";
-    const clientPhone = body.client?.phone ? normalizePhone(body.client.phone) : "";
-    const clientDocument = body.client?.document || "";
-    const productName = body.product?.name || "Produto FirePay";
-    const price = body.price ? body.price / 100 : 0;
-    const paymentMethod = body.payment_method || "";
-
     if (!clientEmail) {
       console.log("[FirePay Webhook] No client email, skipping");
       return NextResponse.json({ success: false, message: "No client email" }, { status: 400 });
     }
 
-    console.log(`[FirePay Webhook] Processing sale for ${clientName} (${clientEmail})`);
+    const sale = {
+      clientName: body.client?.name || "Cliente FirePay",
+      clientEmail,
+      clientPhone: body.client?.phone ? normalizePhone(body.client.phone) : "",
+      productName: body.product?.name || "Produto FirePay",
+      price: body.price ? body.price / 100 : 0,
+      paymentMethod: body.payment_method || "",
+      checkoutId: body.checkout_id || body.id || "—",
+    };
 
-    // CRM update — errors here are non-fatal (Slack always fires below)
-    let action = "Venda registrada";
-    let leadId: string | null = null;
-    let businessId: string | null = null;
+    await sendSlackNotification(sale);
+    console.log("[FirePay Webhook] Slack notification sent");
 
-    try {
-      const lead = await searchLeadByEmail(clientEmail);
-
-      if (lead) {
-        leadId = lead.id;
-        console.log(`[FirePay Webhook] Found existing lead: ${lead.id}`);
-
-        const businesses = await getBusinessesByLead(lead.id);
-
-        if (businesses.length > 0) {
-          const business = businesses[0];
-          console.log(`[FirePay Webhook] Moving business ${business.id} to Efetivado`);
-          await moveBusinessToStage(business.id, STAGE_EFETIVADO_ID, price);
-          businessId = business.id;
-          action = `Negócio #${business.code} movido para Efetivado`;
-        } else {
-          console.log(`[FirePay Webhook] No business found, creating at Efetivado`);
-          const business = await createBusiness(lead.id, STAGE_EFETIVADO_ID, price);
-          businessId = business.id;
-          action = `Novo negócio criado em Efetivado`;
-        }
-      } else {
-        console.log(`[FirePay Webhook] Lead not found, creating new lead + business`);
-        const newLead = await createLead({
-          name: clientName,
-          email: clientEmail,
-          phone: clientPhone,
-          source: `Venda FirePay - ${productName}`,
-          notes: clientDocument ? `CPF/CNPJ: ${clientDocument}` : "",
-        });
-        leadId = newLead.id;
-        const business = await createBusiness(newLead.id, STAGE_EFETIVADO_ID, price);
-        businessId = business.id;
-        action = `Novo lead + negócio criado em Efetivado`;
-      }
-    } catch (crmError) {
-      const errMsg = crmError instanceof Error ? crmError.message : String(crmError);
-      console.error("[FirePay Webhook] CRM error (non-fatal):", errMsg);
-      action = `CRM indisponível: ${errMsg.slice(0, 80)}`;
-    }
-
-    // Slack always fires regardless of CRM outcome
-    await sendSlackSaleNotification({ clientName, clientEmail, productName, price, paymentMethod, action });
-
-    return NextResponse.json({ success: true, action, leadId, businessId });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("[FirePay Webhook] Fatal error:", error);
+    console.error("[FirePay Webhook] Error:", error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
