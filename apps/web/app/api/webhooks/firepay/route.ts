@@ -193,94 +193,58 @@ export async function POST(request: NextRequest) {
 
     console.log(`[FirePay Webhook] Processing sale for ${clientName} (${clientEmail})`);
 
-    // 1. Search lead by email
-    let lead = await searchLeadByEmail(clientEmail);
-    let action = "";
+    // CRM update — errors here are non-fatal (Slack always fires below)
+    let action = "Venda registrada";
+    let leadId: string | null = null;
+    let businessId: string | null = null;
 
-    if (lead) {
-      console.log(`[FirePay Webhook] Found existing lead: ${lead.id}`);
+    try {
+      const lead = await searchLeadByEmail(clientEmail);
 
-      // 2. Search for existing business in Pipeline Vendas
-      const businesses = await getBusinessesByLead(lead.id);
+      if (lead) {
+        leadId = lead.id;
+        console.log(`[FirePay Webhook] Found existing lead: ${lead.id}`);
 
-      if (businesses.length > 0) {
-        // Move the first (most recent) business to "Efetivado"
-        const business = businesses[0];
-        console.log(`[FirePay Webhook] Moving business ${business.id} to Efetivado`);
-        await moveBusinessToStage(business.id, STAGE_EFETIVADO_ID, price);
-        action = `Negócio #${business.code} movido para Efetivado`;
+        const businesses = await getBusinessesByLead(lead.id);
 
-        // Send Slack notification
-        await sendSlackSaleNotification({
-          clientName,
-          clientEmail,
-          productName,
-          price,
-          paymentMethod,
-          action,
-        });
-
-        return NextResponse.json({
-          success: true,
-          action: "moved_business",
-          leadId: lead.id,
-          businessId: business.id,
-        });
+        if (businesses.length > 0) {
+          const business = businesses[0];
+          console.log(`[FirePay Webhook] Moving business ${business.id} to Efetivado`);
+          await moveBusinessToStage(business.id, STAGE_EFETIVADO_ID, price);
+          businessId = business.id;
+          action = `Negócio #${business.code} movido para Efetivado`;
+        } else {
+          console.log(`[FirePay Webhook] No business found, creating at Efetivado`);
+          const business = await createBusiness(lead.id, STAGE_EFETIVADO_ID, price);
+          businessId = business.id;
+          action = `Novo negócio criado em Efetivado`;
+        }
       } else {
-        // Lead exists but no business in this pipeline — create one at Efetivado
-        console.log(`[FirePay Webhook] No business found, creating at Efetivado`);
-        const business = await createBusiness(lead.id, STAGE_EFETIVADO_ID, price);
-        action = `Novo negócio criado em Efetivado`;
-
-        await sendSlackSaleNotification({
-          clientName,
-          clientEmail,
-          productName,
-          price,
-          paymentMethod,
-          action,
+        console.log(`[FirePay Webhook] Lead not found, creating new lead + business`);
+        const newLead = await createLead({
+          name: clientName,
+          email: clientEmail,
+          phone: clientPhone,
+          source: `Venda FirePay - ${productName}`,
+          notes: clientDocument ? `CPF/CNPJ: ${clientDocument}` : "",
         });
-
-        return NextResponse.json({
-          success: true,
-          action: "created_business_existing_lead",
-          leadId: lead.id,
-          businessId: business.id,
-        });
+        leadId = newLead.id;
+        const business = await createBusiness(newLead.id, STAGE_EFETIVADO_ID, price);
+        businessId = business.id;
+        action = `Novo lead + negócio criado em Efetivado`;
       }
-    } else {
-      // 3. Lead not found — create lead + business at Efetivado
-      console.log(`[FirePay Webhook] Lead not found, creating new lead + business`);
-
-      lead = await createLead({
-        name: clientName,
-        email: clientEmail,
-        phone: clientPhone,
-        source: `Venda FirePay - ${productName}`,
-        notes: clientDocument ? `CPF/CNPJ: ${clientDocument}` : "",
-      });
-
-      const business = await createBusiness(lead.id, STAGE_EFETIVADO_ID, price);
-      action = `Novo lead + negócio criado em Efetivado`;
-
-      await sendSlackSaleNotification({
-        clientName,
-        clientEmail,
-        productName,
-        price,
-        paymentMethod,
-        action,
-      });
-
-      return NextResponse.json({
-        success: true,
-        action: "created_lead_and_business",
-        leadId: lead.id,
-        businessId: business.id,
-      });
+    } catch (crmError) {
+      const errMsg = crmError instanceof Error ? crmError.message : String(crmError);
+      console.error("[FirePay Webhook] CRM error (non-fatal):", errMsg);
+      action = `CRM indisponível: ${errMsg.slice(0, 80)}`;
     }
+
+    // Slack always fires regardless of CRM outcome
+    await sendSlackSaleNotification({ clientName, clientEmail, productName, price, paymentMethod, action });
+
+    return NextResponse.json({ success: true, action, leadId, businessId });
   } catch (error) {
-    console.error("[FirePay Webhook] Error:", error);
+    console.error("[FirePay Webhook] Fatal error:", error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
